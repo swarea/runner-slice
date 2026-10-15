@@ -684,6 +684,50 @@ policy_reject 'a repeated host-name is rejected' \
 $a host-name b'
 
 echo
+echo '== values that reach commands, URLs and systemd =='
+
+for bad in system.slice user.slice machine.slice system-runners.slice; do
+    policy_reject "systemd's own slice $bad is rejected" \
+        "slice '$bad' is one of systemd's own" "s/^slice[[:space:]].*/slice            $bad/"
+done
+
+profile_reject() { # DESCRIPTION PATTERN SED-PROGRAM
+    local t
+    t=$(fixture)
+    sed -i -e "$3" "$t/ci/profiles/synthetic.conf"
+    expect_reject "$1" "$2" fabric_validate_fleet "$t/ci"
+    rm -rf "$t"
+}
+
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+profile_reject 'a label with a shell metacharacter is rejected' \
+    "invalid runner-label 'x;id'" '$a runner-label     x;id'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+profile_reject 'a label with a comma is rejected' \
+    "invalid runner-label 'a,b'" '$a runner-label     a,b'
+profile_reject 'a runner name that reads as an option is rejected' \
+    "invalid runner-name '-lab-01'" 's/^runner-name[[:space:]].*/runner-name      -lab-01/'
+profile_reject 'a runner name longer than GitHub allows is rejected' \
+    "invalid runner-name" "s/^runner-name[[:space:]].*/runner-name      $(printf 'a%.0s' {1..65})/"
+profile_reject 'a repository that walks up a path is rejected' \
+    "malformed runner-repo 'example-org/..'" 's#^runner-repo[[:space:]].*#runner-repo      example-org/..#'
+profile_reject 'an owner that starts with a dot is rejected' \
+    "malformed runner-repo '../synthetic'" 's#^runner-repo[[:space:]].*#runner-repo      ../synthetic#'
+
+T=$(fixture)
+long=runner-$(printf 'x%.0s' {1..30})
+sed -i -e "s/runner-synthetic/$long/g" -e "s/ci-synthetic/ci-$long/" "$T/ci/profiles/synthetic.conf"
+expect_reject 'an account name useradd would refuse is rejected' \
+    "is longer than the 32 characters useradd accepts" fabric_validate_fleet "$T/ci"
+rm -rf "$T"
+
+T=$(fixture)
+ln -s "$T/ci/profiles/synthetic.conf" "$T/ci/profiles/linked.conf"
+expect_reject 'a symlinked profile is rejected, not skipped' \
+    'not a regular file' fabric_validate_fleet "$T/ci"
+rm -rf "$T"
+
+echo
 echo '== source immutability =='
 
 AFTER_SHA="$(

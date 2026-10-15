@@ -125,6 +125,15 @@ fabric_profiles() {
         LC_ALL=C sort
 }
 
+# The first line of every unit RunnerSlice writes. A unit file without it was
+# not written by RunnerSlice, and is never replaced or removed by it.
+FABRIC_UNIT_MARKER='# Managed by RunnerSlice. Changes here are replaced on the next apply.'
+
+# fabric_unit_is_ours FILE
+fabric_unit_is_ours() {
+    [ -f "$1" ] && [ "$(head -n 1 "$1")" = "$FABRIC_UNIT_MARKER" ]
+}
+
 fabric_error() {
     printf 'ERROR: %s\n' "$*" >&2
 }
@@ -287,10 +296,21 @@ fabric_validate_policy() {
             failed=1
         fi
     done
-    [[ "$(fabric_value "$file" slice)" =~ ^[a-z0-9][a-z0-9-]*\.slice$ ]] || {
+    local slice
+    slice=$(fabric_value "$file" slice)
+    [[ "$slice" =~ ^[a-z0-9][a-z0-9-]*\.slice$ ]] || {
         fabric_error "$file: slice must be a systemd slice name such as ci.slice"
         failed=1
     }
+    # systemd's own slices hold every system service, every login session
+    # and every VM. Limits written to one of them, or into a slice nested in
+    # one, would land on all of those, not on the runners.
+    case "$slice" in
+        system.slice|user.slice|machine.slice|system-*|user-*|machine-*)
+            fabric_error "$file: slice '$slice' is one of systemd's own; choose a slice for the runners alone"
+            failed=1
+            ;;
+    esac
     [[ "$(fabric_value "$file" name-prefix)" =~ ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ ]] || {
         fabric_error "$file: invalid name-prefix '$(fabric_value "$file" name-prefix)'"
         failed=1
@@ -503,15 +523,28 @@ fabric_validate_profile() {
         failed=1
     }
 
-    [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {
+    # These values reach URLs, API paths and the registration command a
+    # person is asked to run, so they are held to GitHub's own shapes.
+    if ! [[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+$ ]] ||
+       [ "${repo#*/}" = . ] || [ "${repo#*/}" = .. ]; then
         fabric_error "$file: malformed runner-repo '$repo'"
         failed=1
-    }
+    fi
 
-    [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || {
+    # A leading dash would be read as an option by the runner's config.sh.
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]] || {
         fabric_error "$file: invalid runner-name '$name'"
         failed=1
     }
+
+    local label
+    while IFS= read -r label; do
+        [ -n "$label" ] || continue
+        [[ "$label" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            fabric_error "$file: invalid runner-label '$label'"
+            failed=1
+        }
+    done < <(fabric_values "$file" runner-label)
 
     local policy="$ci_dir/fabric.conf" user_prefix name_prefix host_label
     user_prefix=$(fabric_value "$policy" user-prefix)
@@ -519,6 +552,10 @@ fabric_validate_profile() {
     host_label=$(fabric_value "$policy" host-label)
     [[ "$user" =~ ^${user_prefix}(-[a-z0-9][a-z0-9-]*)?$ ]] || {
         fabric_error "$file: invalid runner-user '$user'"
+        failed=1
+    }
+    [ "${#user}" -le 32 ] || {
+        fabric_error "$file: runner-user '$user' is longer than the 32 characters useradd accepts"
         failed=1
     }
 
@@ -627,6 +664,16 @@ _fabric_validate_fleet() {
     fabric_validate_policy "$ci_dir" || failed=1
 
     mapfile -t profiles < <(fabric_profiles "$ci_dir")
+
+    # Profiles are listed as regular files. A symlink would be skipped
+    # without a word, and would let a file outside the inventory decide
+    # what root applies, so it is an error instead.
+    local odd
+    while IFS= read -r odd; do
+        fabric_error "$odd: not a regular file; profiles and policy must be plain files"
+        failed=1
+    done < <(find "$ci_dir/profiles" "$ci_dir/fabric.conf" "$ci_dir/runner-release.conf" \
+                  -maxdepth 1 -name '*.conf' ! -type f 2>/dev/null)
 
     [ "${#profiles[@]}" -gt 0 ] || {
         fabric_error "$ci_dir: no runner profiles found"
@@ -842,6 +889,7 @@ _fabric_render_service() {
     sandbox=$(fabric_value "$profile" sandbox-class)
     platform=$(fabric_value "$ci_dir/runner-release.conf" runner-platform)
 
+    printf '%s\n' "$FABRIC_UNIT_MARKER"
     cat <<UNIT
 [Unit]
 Description=GitHub Actions self-hosted runner ($repo, $platform)
@@ -929,6 +977,7 @@ UNIT
 fabric_render_slice() {
     local file="$1/fabric.conf" value
 
+    printf '%s\n' "$FABRIC_UNIT_MARKER"
     cat <<'UNIT'
 [Unit]
 Description=GitHub Actions runners managed by RunnerSlice
