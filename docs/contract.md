@@ -69,21 +69,27 @@ identifiers.
 
 ## v1 scope
 
-Each feature maps to existing code. Nothing in v1 is written from scratch
-unless the source cannot be generalised.
+Each feature maps to code extracted from the source. Nothing in v1 is
+written from scratch unless the source could not be generalised.
 
-| Feature | Source | Notes |
+| Feature | Where | Status |
 |---|---|---|
-| Declarative inventory: policy, release seed, one profile per runner | `fabric.conf`, `runner-release.conf`, `profiles/*.conf` | key/value text, one key per line, comments allowed |
-| Fleet validation (identities unique, pools consistent, no secrets in profiles) | `fabric-lib.sh` | offline, no root |
-| Unit rendering, with peer runtime roots derived from the inventory | `fabric-lib.sh` | a new runner never requires editing another profile |
-| Pools (several runners for one repository) | `fabric-lib.sh` | same repository, same offered labels, unique names |
-| Host preflight | `lib.sh` preflight, generalised | distribution, architecture, systemd and cgroup v2, required commands |
-| Idempotent converge with a busy-runner guard; `--check` plan mode | `ci-bootstrap.sh` | refuses to restart a runner whose job state is unknown or busy |
-| Registration as an explicit owner step; retire before removing | `ci-bootstrap.sh` | short-lived token from the owner; never stored |
-| Read-only runtime conformance | `ci-check.sh` | unit equals rendering, effective limits, boundaries inside the runner's own namespace |
-| Operational status from GitHub | `ci-status.sh` | separate from conformance by design |
-| Optional network deny list for the slice | slice template | e.g. a cloud metadata address; per provider, not universal |
+| Declarative inventory: policy, release seed, one profile per runner | `fabric.conf`, `runner-release.conf`, `profiles/*.conf` | SYNTHETICALLY TESTED |
+| Fleet validation: unique identities, consistent pools, no secrets in profiles | `fabric/fabric-lib.sh` | SYNTHETICALLY TESTED |
+| Unit rendering, with peer runtime roots derived from the inventory | `fabric/fabric-lib.sh` | SYNTHETICALLY TESTED |
+| Slice limits declared in the policy and rendered, with no defaults | `fabric/fabric-lib.sh` | SYNTHETICALLY TESTED |
+| Pools: several runners for one repository | `fabric/fabric-lib.sh` | SYNTHETICALLY TESTED |
+| Host preflight against the declaration: distribution, architecture, systemd, cgroup v2, optional hostname, root-only configuration | `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
+| Idempotent converge, busy-runner guard, `--check` plan mode | `fabric/fabric-apply.sh` | SYNTHETICALLY TESTED |
+| Registration as a person's step; retiring a pool member | `fabric/fabric-apply.sh` | SYNTHETICALLY TESTED |
+| Read-only runtime conformance | `fabric/fabric-check.sh` | SYNTHETICALLY TESTED |
+| Operational status from GitHub | `fabric/fabric-status.sh` | SYNTHETICALLY TESTED |
+| Optional deny list for the slice | `slice-ip-deny` in the policy | SYNTHETICALLY TESTED; provider-specific |
+
+`tests/run.sh` is the one verification entry point: shellcheck, then every
+drill. The drills run the real scripts from a temporary copy whose library
+points at a fixture root. Only the host is replaced. No result in this table is
+evidence about a real host.
 
 ### Excluded from v1
 
@@ -108,13 +114,49 @@ Each of these was considered and refused:
 | Runner account naming | explicit setting | `user-prefix` in the policy |
 | Required host label | explicit setting | `host-label` in the policy |
 | Mandatory masks naming one host's application, backup and AI paths | host policy, removed | only the Docker socket masks stay mandatory; other masks are the operator's `common-mask` lines |
-| Expected hostname, distribution and architecture constants | explicit setting | host preflight reads a declared host contract |
+| Expected hostname, distribution and architecture constants | explicit setting | preflight checks the distribution, an architecture matching the release seed, systemd, cgroup v2, and an optional `host-name` |
+| Slice limits in a hand-written unit tuned for one host | explicit setting | `slice-*` keys in the policy, required, with no defaults; the unit is rendered |
 | `lib.sh` shared with unrelated host planes | extract minimum | only the helpers the CI scripts use |
 | Checks of one host's legacy paths and secret locations | host policy, removed | secret-location checks become declared `protected-path` lines |
+| Paths and the cgroup layout assumed by the scripts | explicit setting | cgroup path read from systemd; host roots fixed in the library and never read from the environment |
 | Release seed pinned to one architecture and a distribution package | explicit setting | the release file already declares platform and packages; one file per platform |
-| Metadata deny for one cloud | provider-specific | documented per provider; ships disabled; only providers actually tested are listed |
+| Metadata deny for one cloud | provider-specific | `slice-ip-deny`, empty by default; only providers actually tested are documented |
 | `baseline` sandbox left namespaces unrestricted on purpose (a migration choice) | changed deliberately | `baseline` restricts namespaces; `userns` is the explicit opt-in (decision 0002) |
 | CI evidence tool bound to the source repository's judge and policy | not in v1 | separate follow-up candidate |
+
+## Behaviour changed from the source
+
+Three defects were found while porting the converge script, and they are
+fixed here. The source repository is not changed by this project.
+
+- **A slice-only change restarted one arbitrary runner.** Whichever runner
+  installed the changed slice first was restarted, although slice properties
+  take effect on reload. Now a slice change reloads systemd and restarts
+  nothing. Only a runner whose own unit changed is restarted.
+- **A deferred restart could be lost.** When a runner was busy, its new unit
+  was installed and only the restart was deferred, so the next run found the
+  unit current and never restarted it. Now a changed unit is not installed
+  while a job runs or its state is unknown. The difference itself remains the
+  pending work.
+- **Unknown job state was treated as idle on the single-profile path.** That
+  path restarted a runner whose job state could not be read. Now unknown
+  state refuses the restart everywhere.
+
+## To verify on the test VM
+
+These are assumptions the drills encode as fixtures. Each must be observed on
+a real host before any claim beyond SYNTHETICALLY TESTED.
+
+- The runner registers and runs jobs under `RestrictNamespaces=yes`.
+- What `systemctl show` prints for `RestrictNamespaces` (restricted and
+  unrestricted), for `SupplementaryGroups`, and for `CPUQuotaPerSecUSec`.
+- Changed slice limits, and a changed `IPAddressDeny`, take effect for
+  running runners on daemon-reload, without a restart.
+- `ProtectHome=tmpfs` with `BindPaths` produces the mount table the check
+  expects.
+- Which packages the runner needs on the target Ubuntu release, if any, for
+  `apt-dependency`.
+- `useradd`, `install` and `tar` behave as the fixture doubles assume.
 
 ## The CI evidence tool
 
