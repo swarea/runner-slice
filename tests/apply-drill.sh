@@ -47,6 +47,7 @@ expect_out 'the registration command is printed' 'actions/runners/registration-t
 expect_out 'registration names the runner and its labels' '--name lab-app-01 --labels lab,app'
 expect_out 'the token travels in the environment' 'sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app'
 expect_no 'the token is never on a command line' '--token'
+expect_no 'a first registration never replaces a runner of the same name' '--unattended --replace'
 expect_no 'no token is requested by the tool itself' 'TOKEN=ghs'
 holds 'the verified release is unpacked' [ -x "$H/root/var/lib/ci-app/runner/config.sh" ]
 expect_lines 'the archive was downloaded once' "$H/fake/curl.log" 1
