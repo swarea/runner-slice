@@ -78,10 +78,18 @@ the integration VM:
    runners' cgroup files and IP filter programs, not by the reload's exit
    code.
 4. `ProtectHome=tmpfs` with `BindPaths` produces the mount table the check
-   expects. `InaccessiblePaths` masks appear as the check resolves them,
-   including `/var/run` aliases.
-5. `.runner` has the fields `agentName`, `gitHubUrl` and `workFolder` and a
-   UTF-8 BOM. `config.sh` accepts the printed registration command.
+   expects.
+   - `InaccessiblePaths` masks appear as mounts whose root is
+     `/systemd/inaccessible/...`, the field the check reads.
+   - They resolve as the check expects, including `/var/run` aliases.
+5. Registration and the files it reads:
+   - `.runner` has the fields `agentName`, `gitHubUrl` and `workFolder`, and
+     a UTF-8 BOM;
+   - `config.sh` takes the token from `ACTIONS_RUNNER_INPUT_TOKEN` and
+     accepts the printed command;
+   - `bin/Runner.Listener.deps.json` names the installed release as
+     `Runner.Listener/<version>`, after self-updates too. RunnerSlice reads
+     the version there and never executes the runner.
 6. Which packages, if any, the runner needs on the target Ubuntu release.
 7. `useradd --system` gives a uid below `UID_MIN`, with home `/home/NAME`.
 8. GitHub's "remove all custom labels" endpoint drains a runner.

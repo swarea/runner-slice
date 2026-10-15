@@ -30,3 +30,16 @@ of it has run on a real host.
   - the registration's identity.
 - **A reproducible release archive with a checksum**, whose own tests run
   after unpacking.
+- **Fixes from the pre-integration security review:**
+  - the runner's version is read as data, and the runner is never executed by
+    `apply` or `check`;
+  - a registered runner is never unpacked into, and a first unpack goes into
+    a directory root has just created;
+  - the registration token goes through the environment, not the command
+    line;
+  - runtime roots, groups and homes that RunnerSlice did not create are
+    neither adopted nor removed;
+  - retirement removes nothing unless every precondition holds;
+  - check fails when an access test cannot run;
+  - masks are recognised by the mount's root only;
+  - `TMPDIR` is ignored, and paths are resolved physically.

@@ -42,7 +42,7 @@ Actions Runner Controller, or GARM with a VM provider.
 | Everything else on the host: CPU, memory and process count | One slice for all runners with declared `CPUQuota`, `MemoryMax`, optional `MemoryHigh`, and `TasksMax` | The installed slice is compared with the rendering. systemd's effective values are compared with the declaration. |
 | Declared network destinations (`slice-ip-deny`) | `IPAddressDeny=` on the slice. systemd merges it into every runner's own IP filter. | systemd's effective deny list includes each entry. No allow list exists on the runner, the slice or any slice above it. |
 | What root runs and reads | Preflight refuses a configuration or tool tree that root does not own exclusively: other owners, group- or world-writable entries, symlinks, writable parent directories. | This is checked before every apply and check. |
-| Units, accounts and directories RunnerSlice did not create | Units carry a first-line marker. Accounts are adopted only if they are system accounts with the expected home. | Apply stops before creating anything next to a foreign unit, and never removes what is not RunnerSlice's. |
+| Units, accounts and directories RunnerSlice did not create | Units carry a first-line marker. Runtime roots carry a root-owned marker naming their profile. Accounts are adopted only if they are system accounts with the expected home. A group or home that predates its account is never adopted. | Apply stops before creating anything next to a foreign unit or directory. Retirement checks every precondition first, and removes nothing unless all hold. |
 | Running jobs | No unit is replaced and no runner is restarted while a job is running or its state is unknown. | The job state is read from the service's cgroup, whose path comes from systemd, and from `/proc`. |
 
 Every runner unit also sets:
@@ -114,6 +114,15 @@ observed on a real host before it counts.
 
 - Registration needs a token valid for one hour. RunnerSlice never asks for
   it, stores it or prints it. It prints the command for a person to run.
+  That command passes the token through the environment, never as an
+  argument: sudo logs command lines, and `ps` shows them to every account.
+- RunnerSlice never runs what the runner account can write. The installed
+  version is read from the runner's dependency manifest as data. Files the
+  runner writes are opened without following symlinks, only if they are
+  small regular files.
+- A registered runner's directory is never unpacked into again. A first
+  unpack goes into a directory root has just created, closed to the runner
+  account until it is handed over.
 - `.runner` holds the runner's name, repository and work folder, and no
   credential. RunnerSlice reads it to refuse a runner registered as something
   else.
