@@ -16,7 +16,12 @@
 # is fabric-status.sh's question.
 set -uo pipefail
 
-FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Temporary files of a root run go where root decides, not where an inherited
+# TMPDIR points: a directory another account can write would let it swap a
+# rendered unit before it is installed.
+unset TMPDIR
+
+FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=fabric-lib.sh
 . "$FABRIC_DIR/fabric-lib.sh"
 # shellcheck source=host-lib.sh
@@ -63,10 +68,11 @@ done
 [ -n "$CONFIG" ] || usage
 [ -n "$MODE" ] || usage
 [ -d "$CONFIG" ] || { echo "no such configuration directory: $CONFIG" >&2; exit 2; }
-CONFIG=$(cd "$CONFIG" && pwd)
+CONFIG=$(cd "$CONFIG" && pwd -P)
 POLICY="$CONFIG/fabric.conf"
 
 if [ "$MODE" = all ]; then
+    host_preflight "$CONFIG" --root runuser dpkg python3
     fabric_validate_fleet "$CONFIG" || { echo "inventory validation failed" >&2; exit 1; }
 
     all_failed=0
@@ -234,11 +240,11 @@ fi
 
 for sock in /run/docker.sock /var/run/docker.sock; do
     [ -e "$HOST_ROOT$sock" ] || continue
-    if runuser -u "$RUNNER_USER" -- test -w "$HOST_ROOT$sock" 2>/dev/null; then
-        fail "$RUNNER_USER can write $sock"
-    else
-        ok "$RUNNER_USER cannot use $sock"
-    fi
+    case "$(host_access_as "$RUNNER_USER" -w "$HOST_ROOT$sock")" in
+        DENIED) ok "$RUNNER_USER cannot use $sock" ;;
+        ALLOWED) fail "$RUNNER_USER can write $sock" ;;
+        *) fail "cannot test whether $RUNNER_USER can write $sock" ;;
+    esac
 done
 
 # ---------------------------------------------------------------------------
@@ -265,14 +271,12 @@ for dep in "${APT_DEPS[@]}"; do
     if dpkg -s "$dep" >/dev/null 2>&1; then ok "$dep installed"; else fail "$dep missing"; fi
 done
 
-listener="$HOST_ROOT$RUNNER_DIR/bin/Runner.Listener"
-if [ ! -x "$listener" ]; then
-    fail "$RUNNER_DIR/bin/Runner.Listener is missing"
+# The version is read from the runner's dependency manifest. Executing the
+# runner's binary to ask would run code the runner account can rewrite.
+if ! got=$(host_runner_version "$HOST_ROOT$RUNNER_DIR"); then
+    fail "cannot determine the installed runner version"
 else
-    got=$(runuser -u "$RUNNER_USER" -- "$listener" --version 2>/dev/null | tr -d '\r' | head -1)
-    if [ -z "$got" ]; then
-        fail "cannot determine the installed runner version"
-    elif [ "$(printf '%s\n%s\n' "$RUNNER_VERSION" "$got" | sort -V | head -1)" = "$RUNNER_VERSION" ]; then
+    if [ "$(printf '%s\n%s\n' "$RUNNER_VERSION" "$got" | sort -V | head -1)" = "$RUNNER_VERSION" ]; then
         # Above the seed is the expected steady state: runners update
         # themselves. Below it means that is not happening.
         ok "runner version $got, at or above the seed $RUNNER_VERSION"

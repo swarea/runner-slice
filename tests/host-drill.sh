@@ -83,6 +83,13 @@ result "an ordinary mount is not mistaken for a mask"  "1:"        "$(mask "$FIX
 result "unreadable mountinfo fails closed"             "2:"        "$(mask "$T/does-not-exist" "$T/real")"
 result "an absent path is not reported as covered"     "1:"        "$(mask "$FIX" "$T/never-existed")"
 
+# The word alone is not a mask: only a mount whose root is one of systemd's
+# inaccessible nodes is.
+mkdir -p "$T/srv/inaccessible-data"
+mi_plain 400 "$T/srv/inaccessible-data" > "$T/mountinfo-word"
+result "a mount point that only contains the word is not a mask" "1:" \
+    "$(mask "$T/mountinfo-word" "$T/srv/inaccessible-data")"
+
 echo
 echo '== default-deny home namespace =='
 
@@ -436,15 +443,53 @@ result "root by another name is not RunnerSlice's" no "$(ours runner-app)"
 
 account runner-app 998 /home/runner-app
 acct host_remove_user runner-app >/dev/null
-result "RunnerSlice's own account is removed with its home and group" \
-    "userdel --remove runner-app|groupdel runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+result "RunnerSlice's own account is removed, with its home and its own group" \
+    "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
 
 : > "$FAKE_ACCOUNTS.passwd"; : > "$FAKE_ACCOUNTS.group"; : > "$FAKE_ACCOUNTS.log"
 acct host_ensure_user runner-new >/dev/null
-result "a missing account is created as a system account" \
-    "groupadd --system runner-new|useradd --system --gid runner-new --home-dir /home/runner-new --create-home --shell /bin/bash runner-new" \
+result "a missing account is created as a system account with its own group" \
+    "useradd --system --user-group --home-dir /home/runner-new --create-home --shell /bin/bash runner-new" \
     "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+: > "$FAKE_ACCOUNTS.passwd"; echo "runner-new:x:990:" > "$FAKE_ACCOUNTS.group"; : > "$FAKE_ACCOUNTS.log"
+result "a group of that name without the account is not adopted" \
+    "1:group runner-new exists without an account of that name; refusing to adopt it" \
+    "$(acct host_ensure_user runner-new)"
+result "and nothing was created" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
+
+: > "$FAKE_ACCOUNTS.group"; mkdir -p "$ACC/root/home/runner-new"
+result "a home of that name without the account is not adopted" \
+    "1:/home/runner-new exists without an account of that name; refusing to adopt it" \
+    "$(acct host_ensure_user runner-new)"
+rmdir "$ACC/root/home/runner-new"
+
+account runner-app 998 /home/runner-app
+# shellcheck disable=SC2016 # the fake runuser expands these when it runs
+printf '#!/usr/bin/env bash\necho "userdel $*" >> "$FAKE_ACCOUNTS.log"\nexit 8\n' > "$T/bin/userdel"
+result "a failing userdel is a failure, not hidden" \
+    "0:userdel could not remove runner-app; nothing else was changed for it" \
+    "$(acct host_remove_user runner-app)"
 rm -f "$T/bin/getent" "$T/bin/groupadd" "$T/bin/useradd" "$T/bin/userdel" "$T/bin/groupdel"
+
+echo
+echo '== access tests answer only what they could test =='
+
+mkdir -p "$T/acc-bin"
+: > "$T/acc-file"
+chmod 0644 "$T/acc-file"
+# shellcheck disable=SC2016 # the fake runuser expands these when it runs
+printf '#!/usr/bin/env bash\nwhile [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done; shift; exec "$@"\n' > "$T/acc-bin/runuser"
+chmod +x "$T/acc-bin/runuser"
+result "a readable path reads as ALLOWED" ALLOWED "$(PATH="$T/acc-bin:$PATH" host_access_as nobody -r "$T/acc-file")"
+chmod 0000 "$T/acc-file"
+result "an unreadable path reads as DENIED" DENIED "$(PATH="$T/acc-bin:$PATH" host_access_as nobody -r "$T/acc-file")"
+printf '#!/usr/bin/env bash\necho "runuser: cannot open session" >&2\nexit 1\n' > "$T/acc-bin/runuser"
+result "a runuser that cannot run the test answers nothing" "" "$(PATH="$T/acc-bin:$PATH" host_access_as nobody -r "$T/acc-file")"
+out=$(PATH="$T/acc-bin:$PATH" host_expect_no_access nobody "$T/acc-file")
+result "and the boundary check fails rather than passes" yes \
+    "$(grep -q 'FAIL    cannot test whether nobody can read' <<<"$out" && echo yes || echo no)"
+check_failed=0
 
 echo
 echo '== mode comparison =='

@@ -94,6 +94,12 @@ fi
 exec /usr/bin/id "$@"
 EOF
 
+# Processes of an account, from a file: one PID per line.
+cat > "$BIN/pgrep" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = -u ] && [ -s "$FAKE/procs-$2" ] && cat "$FAKE/procs-$2"
+EOF
+
 cat > "$BIN/runuser" <<'EOF'
 #!/usr/bin/env bash
 while [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done
@@ -106,7 +112,12 @@ chmod +x "$BIN"/*
 PAYLOAD="$T/payload"
 mkdir -p "$PAYLOAD/bin"
 printf '#!/bin/sh\nexit 0\n' > "$PAYLOAD/config.sh"
-printf '#!/bin/sh\necho 2.338.0\n' > "$PAYLOAD/bin/Runner.Listener"
+# The runner binary only leaves a trace: nothing RunnerSlice runs as root may
+# execute it. Its version is data, in the dependency manifest beside it.
+# shellcheck disable=SC2016 # the fake runner expands this when it runs
+printf '#!/bin/sh\necho executed >> "$FAKE/listener-executed"\necho 2.338.0\n' > "$PAYLOAD/bin/Runner.Listener"
+printf '{"runtimeTarget": {"name": ".NETCoreApp,Version=v8.0/linux-x64"}, "libraries": {"Runner.Listener/2.338.0": {"type": "project"}, "Runner.Common/1.0.0": {"type": "project"}}}\n' \
+    > "$PAYLOAD/bin/Runner.Listener.deps.json"
 printf '#!/bin/sh\nexit 0\n' > "$PAYLOAD/bin/runsvc.sh"
 chmod +x "$PAYLOAD/config.sh" "$PAYLOAD/bin/"*
 ARCHIVE="$T/actions-runner-linux-x64-2.338.0.tar.gz"

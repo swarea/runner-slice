@@ -228,7 +228,9 @@ host_preflight() {
 
     if [ "$privilege" = --root ]; then
         local unsafe
-        unsafe=$(host_unsafe_paths "$config" "$FABRIC_DIR")
+        # The whole tool tree, not only fabric/: the command in bin/ and
+        # VERSION are read or run as root too.
+        unsafe=$(host_unsafe_paths "$config" "$(dirname "$FABRIC_DIR")")
         if [ -n "$unsafe" ]; then
             warn "not owned by root, or writable by others: $unsafe"
             failed=1
@@ -282,10 +284,7 @@ host_remove_file() {
     local path=$1 reason=$2
     [ -e "$path" ] || { ok "no $path"; return 1; }
     change "remove $path ($reason)"
-    if [ "$CHECK_ONLY" -eq 0 ]; then
-        rm -f "$path"
-        rmdir --ignore-fail-on-non-empty "$(dirname "$path")" 2>/dev/null || true
-    fi
+    [ "$CHECK_ONLY" -eq 0 ] && rm -f "$path"
     return 0
 }
 
@@ -332,15 +331,21 @@ host_ensure_user() {
         fail "account $name exists and is not a RunnerSlice system account; refusing to adopt it"
         return 1
     fi
-    if ! getent group "$name" >/dev/null; then
-        change "create group $name"
-        [ "$CHECK_ONLY" -eq 0 ] && groupadd --system "$name"
-    else
-        ok "group $name exists"
-    fi
     if ! getent passwd "$name" >/dev/null; then
-        change "create user $name (home /home/$name, no supplementary groups)"
-        [ "$CHECK_ONLY" -eq 0 ] && useradd --system --gid "$name" \
+        # A group or home of this name without the account predates it, and
+        # belongs to someone else, or to an earlier install that was removed
+        # by hand. Neither is adopted: useradd would make it the runner's.
+        if getent group "$name" >/dev/null; then
+            fail "group $name exists without an account of that name; refusing to adopt it"
+            note "  if it is a leftover of an earlier install, remove it by hand: groupdel $name"
+            return 1
+        fi
+        if [ -e "$HOST_ROOT/home/$name" ]; then
+            fail "/home/$name exists without an account of that name; refusing to adopt it"
+            return 1
+        fi
+        change "create user $name with its own group (home /home/$name, no supplementary groups)"
+        [ "$CHECK_ONLY" -eq 0 ] && useradd --system --user-group \
             --home-dir "/home/$name" --create-home --shell /bin/bash "$name"
     else
         ok "user $name exists"
@@ -369,16 +374,18 @@ host_remove_user() {
             fail "account $name is not a RunnerSlice system account; not removing it"
             return 0
         fi
-        change "remove user $name and its home"
-        [ "$CHECK_ONLY" -eq 0 ] && userdel --remove "$name" 2>/dev/null
+        change "remove user $name, its home and its own group"
+        if [ "$CHECK_ONLY" -eq 0 ] && ! userdel --remove "$name"; then
+            fail "userdel could not remove $name; nothing else was changed for it"
+            return 0
+        fi
     else
         ok "user $name is absent"
     fi
-    if getent group "$name" >/dev/null; then
-        change "remove group $name"
-        [ "$CHECK_ONLY" -eq 0 ] && groupdel "$name"
-    else
-        ok "group $name is absent"
+    # userdel removes the account's own group with it. A group of that name
+    # left behind is not the account's, so it is reported, never deleted.
+    if [ "$CHECK_ONLY" -eq 0 ] && getent group "$name" >/dev/null; then
+        note "group $name still exists; it was not created with this account, so it is left"
     fi
     return 0
 }
@@ -466,44 +473,95 @@ host_job_state() {
     return 1
 }
 
+# Python run by root on files the runner account can write. It opens without
+# following a symlink, refuses anything but a small regular file, and never
+# executes what it reads.
+HOST_SAFE_JSON_PY='
+import json, os, stat, sys
+
+def safe_load(path, limit=4 << 20):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError as e:
+        raise ValueError(f"cannot open ({e.strerror})")
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ValueError("not a regular file")
+        if st.st_size > limit:
+            raise ValueError("larger than expected")
+        data = b""
+        while len(data) <= limit:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > limit:
+            raise ValueError("larger than expected")
+    finally:
+        os.close(fd)
+    try:
+        return json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError):
+        raise ValueError("not JSON")
+'
+
+# host_runner_version RUNNER_DIR
+#
+# The runner release installed in RUNNER_DIR, read from the runner's own
+# dependency manifest -- data, never executed. Running the runner's binary to
+# ask its version would run code the runner account can rewrite, outside the
+# service's sandbox and attached to the operator's terminal. Prints the
+# version and returns 0, or returns 2 when it cannot be read safely.
+host_runner_version() {
+    python3 -I -c "$HOST_SAFE_JSON_PY"'
+import re
+try:
+    data = safe_load(sys.argv[1])
+    libs = data.get("libraries", {}) if isinstance(data, dict) else {}
+    found = [k.split("/", 1)[1] for k in libs if isinstance(k, str) and k.startswith("Runner.Listener/")]
+except ValueError:
+    sys.exit(2)
+if len(found) != 1 or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", found[0]):
+    sys.exit(2)
+print(found[0])
+' "$1/bin/Runner.Listener.deps.json"
+}
+
 # host_registration_state RUNNER_DIR REPO NAME WORK_DIR
 #
 # Whether the runner in RUNNER_DIR is registered as the profile says: to that
 # repository, under that name, with that work folder. Reads only .runner,
 # which the runner writes at registration and which holds no credential;
 # .credentials is never opened. Prints "ok" and returns 0, prints what differs
-# and returns 1, or prints why it could not tell and returns 2.
+# and returns 1, or prints why it could not tell and returns 2. What it
+# prints from the file is escaped, so it cannot drive the terminal.
 host_registration_state() {
-    local file="$1/.runner"
-    [ -r "$file" ] || { echo "$file is unreadable"; return 2; }
-    python3 -I - "$file" "$2" "$3" "$4" <<'PY'
-import json
-import sys
-
+    python3 -I -c "$HOST_SAFE_JSON_PY"'
 path, repo, name, work = sys.argv[1:5]
 try:
-    with open(path, encoding="utf-8-sig") as f:
-        data = json.load(f)
-except (OSError, ValueError) as e:
-    print(f"{path} cannot be parsed: {e.__class__.__name__}")
+    data = safe_load(path, 1 << 20)
+except ValueError as e:
+    print(f".runner {e}")
     sys.exit(2)
 if not isinstance(data, dict):
-    print(f"{path} is not a JSON object")
+    print(".runner is not a JSON object")
     sys.exit(2)
-
 problems = []
 url = str(data.get("gitHubUrl", "")).rstrip("/")
 if url.lower() != f"https://github.com/{repo}".lower():
-    problems.append(f"repository is {url or 'missing'}")
-if data.get("agentName") != name:
-    problems.append(f"name is {data.get('agentName')!r}")
-if data.get("workFolder") != work:
-    problems.append(f"work folder is {data.get('workFolder')!r}")
+    problems.append(f"repository is {url!r}")
+agent = data.get("agentName")
+folder = data.get("workFolder")
+if agent != name:
+    problems.append(f"name is {agent!r}")
+if folder != work:
+    problems.append(f"work folder is {folder!r}")
 if problems:
     print("; ".join(problems))
     sys.exit(1)
 print("ok")
-PY
+' "$1/.runner" "$2" "$3" "$4"
 }
 
 # ---------------------------------------------------------------------------
@@ -546,8 +604,11 @@ host_mask_for() {
     canon=${canon#"$HOST_ROOT"}
     # Only the literal path when canonicalisation fails: guessing wider would
     # be the direction that turns a missing mask into a pass.
+    # systemd masks a path by bind-mounting one of its inaccessible nodes over
+    # it, so the mount's root (field 4) is that node. A mount point that only
+    # happens to contain the word is not a mask.
     awk -v a="$path" -v b="${canon:-$path}" '
-        !/inaccessible/ { next }
+        index($4, "/systemd/inaccessible/") != 1 { next }
         {
             mp = $5
             if (mp == a || mp == b) { print mp; found = 1; exit }
@@ -687,16 +748,29 @@ host_expect_masked() {
 # cover the account wherever it runs, including a login shell.
 host_expect_no_access() {
     local user=$1; shift
-    local p
+    local p verdict
     for p in "$@"; do
         if [ ! -e "$HOST_ROOT$p" ]; then
             ok "absent: $p"
-        elif runuser -u "$user" -- test -r "$HOST_ROOT$p" 2>/dev/null; then
-            fail "$user can read $p ($(host_owner_mode "$HOST_ROOT$p"))"
-        else
-            ok "$user cannot read $p"
+            continue
         fi
+        verdict=$(host_access_as "$user" -r "$HOST_ROOT$p")
+        case "$verdict" in
+            DENIED) ok "$user cannot read $p" ;;
+            ALLOWED) fail "$user can read $p ($(host_owner_mode "$HOST_ROOT$p"))" ;;
+            *) fail "cannot test whether $user can read $p (${verdict:-no answer})" ;;
+        esac
     done
+}
+
+# host_access_as USER TEST PATH   ALLOWED or DENIED, as USER sees PATH
+#
+# Prints exactly ALLOWED or DENIED. Anything else, including runuser failing
+# to start the test at all, prints nothing usable, and the caller fails.
+host_access_as() {
+    # shellcheck disable=SC2016 # expanded by the inner sh, from its arguments
+    runuser -u "$1" -- sh -c 'if test "$1" "$2"; then echo ALLOWED; else echo DENIED; fi' \
+        sh "$2" "$3" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
