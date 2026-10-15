@@ -706,7 +706,8 @@ host_expect_no_access() {
 # host_report_apply
 #
 # --check fails when configuration drifted or an operator action is
-# outstanding; a normal run reports what it did.
+# outstanding. A normal run reports what it did, and exits 0 only when
+# nothing is left to do.
 host_report_apply() {
     step "result"
     if [ "$CHECK_ONLY" -eq 1 ]; then
@@ -724,10 +725,12 @@ host_report_apply() {
     else
         note "no change: host already matches the declared configuration"
     fi
-    if [ "$operator_todo" -eq 1 ]; then
-        note "operator actions above are still outstanding"
-    fi
-    [ "$check_failed" -eq 1 ] && { note "conformance failures above"; exit 1; }
+    # Exit 0 means converged. A step left to a person, such as registration or
+    # a unit waiting for a job, is not converged, and a script or a person
+    # reading only the exit code must be able to tell.
+    [ "$check_failed" -eq 1 ] && note "conformance failures above"
+    [ "$operator_todo" -eq 1 ] && note "operator actions above are still outstanding"
+    [ "$check_failed" -eq 0 ] && [ "$operator_todo" -eq 0 ] || exit 1
     exit 0
 }
 
