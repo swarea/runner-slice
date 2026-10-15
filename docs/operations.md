@@ -55,7 +55,7 @@ Every `apply` line is one of:
    ```sh
    export ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST /repos/<owner>/<repo>/actions/runners/registration-token --jq .token)"
    sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app -H \
-       env HOME=/home/runner-app /var/lib/ci-app/runner/config.sh \
+       env -C /var/lib/ci-app/runner HOME=/home/runner-app ./config.sh \
        --url https://github.com/<owner>/<repo> \
        --name <runner-name> --labels <labels> \
        --work /var/lib/ci-app/work --unattended
@@ -64,6 +64,12 @@ Every `apply` line is one of:
    ```
 
    Copy the exact command `apply` printed. It has your names and labels in it.
+
+   `env -C` runs `config.sh` in its own directory. `config.sh` checks its
+   native libraries with `./bin/...` paths before it changes directory, so run
+   from anywhere else that check finds no files, prints `ldd: … No such file
+   or directory`, and passes without checking anything (actions/runner #945,
+   #4460).
 
    There is no `--replace`. If a runner of that name is already registered to
    the repository, `config.sh` refuses, because that runner may be another
