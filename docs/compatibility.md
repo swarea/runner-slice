@@ -41,5 +41,5 @@ operator's job, through `slice-ip-deny`; see [threat-model.md](threat-model.md).
 - **The runner release** is taken from `actions/runner`, using the
   `linux-x64` and `linux-arm64` archives. Registered runners update
   themselves.
-- **`runnerslice status`** needs `gh` with read access to the repository's
+- **`runner-slice status`** needs `gh` with read access to the repository's
   runners.
