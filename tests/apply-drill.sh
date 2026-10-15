@@ -271,16 +271,11 @@ rm -f "$H/$UNITS/ci-handmade-runner.service"
 echo
 echo '== retiring a pool member =='
 # ---------------------------------------------------------------------------
-apply --retire app
-expect_rc 'a runner outside a pool cannot be retired' 2
-apply --retire web
-expect_rc "a pool's first runner cannot be retired" 2
-
 busy ci-web-2-runner.service
 before=$(snapshot)
 apply --retire web-2
 expect_rc 'a busy member is not retired' 1
-expect_out 'the drain command is printed' "actions/runners/\$RID/labels/web"
+expect_out 'the drain command is printed' "actions/runners/\$RID/labels"
 expect_same 'a refused retirement changes nothing' "$before"
 idle ci-web-2-runner.service
 
@@ -307,6 +302,22 @@ only app docs web
 apply --all
 expect_rc 'the inventory without the member converges' 0
 expect_lines 'three runners remain enabled' "$H/fake/enabled" 3
+
+# A runner outside any pool retires the same way.
+apply --retire app --check
+expect_rc 'a planned retirement reports pending work' 1
+apply --retire app
+expect_rc 'a single runner stops at deregistration' 10
+rm -f "$H/root/var/lib/ci-app/runner/.runner" "$H/root/var/lib/ci-app/runner/.credentials"
+apply --retire app
+expect_rc 'and is then removed' 0
+refutes 'its unit is removed' [ -e "$H/$UNITS/ci-app-runner.service" ]
+refutes 'its runtime root is removed' [ -e "$H/root/var/lib/ci-app" ]
+refutes 'its account is removed' [ -e "$H/fake/user-runner-app" ]
+only docs web
+apply --all
+expect_rc 'the remaining inventory converges' 0
+refutes "the remaining units no longer mask the retired root" grep -q 'InaccessiblePaths=/var/lib/ci-app$' "$H/$UNITS/ci-docs-runner.service"
 
 # ---------------------------------------------------------------------------
 echo
