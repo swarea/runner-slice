@@ -193,6 +193,22 @@ check --profile app
 expect_fail 'a runtime root the runner owns fails' '/var/lib/ci-app is runner-app:runner-app 750, expected root:runner-app 0750'
 echo 'root:runner-app 750' > "$H/root/var/lib/ci-app.owner"
 
+RUNNER_FILE="$H/root/var/lib/ci-app/runner/.runner"
+cp "$RUNNER_FILE" "$T/runner.saved"
+sed -i 's#"agentName": "[^"]*"#"agentName": "lab-other-01"#' "$RUNNER_FILE"
+check --profile app
+expect_fail 'a runner registered under another name fails' "the registration does not match the profile: name is 'lab-other-01'"
+sed -i 's#"workFolder": "[^"]*"#"workFolder": "/tmp/work"#' "$RUNNER_FILE"
+check --profile app
+expect_fail 'every difference is named' "work folder is '/tmp/work'"
+printf '{"agentName": ' > "$RUNNER_FILE"
+check --profile app
+expect_fail 'an unparseable registration fails closed' 'cannot read the registration'
+cp "$T/runner.saved" "$RUNNER_FILE"
+check --profile app
+expect_pass 'the restored registration passes'
+expect_out 'it is reported' 'registered as lab-app-01 for example-org/app, working in /var/lib/ci-app/work'
+
 echo 'runner-app:runner-app 644' > "$H/root/var/lib/ci-app/runner/.credentials.owner"
 check --profile app
 expect_fail 'readable credentials fail' '.credentials is runner-app:runner-app 644'

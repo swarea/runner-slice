@@ -84,7 +84,7 @@ CONFIG=$(cd "$CONFIG" && pwd)
 
 POLICY="$CONFIG/fabric.conf"
 
-host_preflight "$CONFIG" --root curl tar sha256sum getent runuser
+host_preflight "$CONFIG" --root curl tar sha256sum getent runuser python3
 
 fabric_validate_fleet "$CONFIG" || {
     echo "inventory validation failed" >&2
@@ -107,7 +107,7 @@ fabric_orphan_units() {
     )
     for unit in "$UNIT_DIR/$NAME_PREFIX-runner.service" \
                 "$UNIT_DIR/$NAME_PREFIX"-*-runner.service; do
-        [ -e "$unit" ] || continue
+        fabric_unit_is_ours "$unit" || continue
         grep -Fxq -- "$(basename "$unit")" <<<"$known" || basename "$unit"
     done
 }
@@ -313,8 +313,10 @@ if [ "$MODE" = retire ]; then
     if [ -f "$FS_RUNNER_DIR/.runner" ] || [ -f "$FS_RUNNER_DIR/.credentials" ]; then
         note "left in place until deregistration is done"
     else
-        if host_remove_file "$UNIT_DIR/$SERVICE" "retired pool member" &&
-           [ "$CHECK_ONLY" -eq 0 ]; then
+        if [ -e "$UNIT_DIR/$SERVICE" ] && ! fabric_unit_is_ours "$UNIT_DIR/$SERVICE"; then
+            fail "refusing to remove $UNIT_DIR/$SERVICE: it was not written by RunnerSlice"
+        elif host_remove_file "$UNIT_DIR/$SERVICE" "retired pool member" &&
+             [ "$CHECK_ONLY" -eq 0 ]; then
             systemctl daemon-reload
         fi
         # Validation already proved the root is /var/lib/<prefix>-<id> and
@@ -352,9 +354,23 @@ if [ "$FLEET_CHILD" -eq 1 ] && [ "$CHECK_ONLY" -eq 0 ] &&
 fi
 
 # ---------------------------------------------------------------------------
+step "ownership"
+# ---------------------------------------------------------------------------
+# A unit of the same name that RunnerSlice did not write is someone else's
+# service. Nothing for this profile is created next to it.
+for unit in "$SLICE" "$SERVICE"; do
+    if [ -e "$UNIT_DIR/$unit" ] && ! fabric_unit_is_ours "$UNIT_DIR/$unit"; then
+        fail "$UNIT_DIR/$unit exists and was not written by RunnerSlice; rename the profile or remove it by hand"
+    else
+        ok "$unit is RunnerSlice's or absent"
+    fi
+done
+[ "$check_failed" -eq 0 ] || host_report_apply
+
+# ---------------------------------------------------------------------------
 step "account"
 # ---------------------------------------------------------------------------
-host_ensure_user "$RUNNER_USER"
+host_ensure_user "$RUNNER_USER" || host_report_apply
 
 # ---------------------------------------------------------------------------
 step "directories"
@@ -393,7 +409,22 @@ step "runner release $RUNNER_VERSION"
 # at. A registered runner updates itself, and GitHub eventually refuses
 # releases that are too old, so freezing the version would trade a benign
 # drift report for an outage.
-if [ -x "$FS_RUNNER_DIR/config.sh" ]; then
+# The seed marker is written, root-owned, only after a complete unpack. An
+# unpack interrupted part-way leaves config.sh without it, and is redone
+# rather than mistaken for a runner. A registered runner is never re-seeded.
+SEED_MARKER="$FS_INSTALL_ROOT/.runnerslice-seeded"
+if [ -x "$FS_RUNNER_DIR/config.sh" ] &&
+   [ ! -f "$SEED_MARKER" ] && [ ! -f "$FS_RUNNER_DIR/.runner" ]; then
+    change "complete an interrupted unpack of $RUNNER_ARCHIVE into $RUNNER_DIR"
+    needs_unpack=1
+elif [ -x "$FS_RUNNER_DIR/config.sh" ]; then
+    needs_unpack=0
+else
+    change "download and unpack $RUNNER_ARCHIVE into $RUNNER_DIR"
+    needs_unpack=1
+fi
+
+if [ "$needs_unpack" -eq 0 ]; then
     installed=""
     if [ -x "$FS_RUNNER_DIR/bin/Runner.Listener" ]; then
         installed=$(runuser -u "$RUNNER_USER" -- "$FS_RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null \
@@ -415,7 +446,6 @@ if [ -x "$FS_RUNNER_DIR/config.sh" ]; then
         note "  .runner and .credentials survive an unpack, so this does not re-register"
     fi
 else
-    change "download and unpack $RUNNER_ARCHIVE into $RUNNER_DIR"
     if [ "$CHECK_ONLY" -eq 0 ]; then
         mkdir -m 0700 "$WORK/release"
         curl -fsSL --retry 5 --retry-delay 5 -o "$WORK/release/$RUNNER_ARCHIVE" "$RUNNER_URL"
@@ -427,6 +457,7 @@ else
         # The archive's top-level "." entry can replace the directory mode
         # set above, so it is reasserted after extraction.
         chmod 0750 "$FS_RUNNER_DIR"
+        printf '%s %s\n' "$RUNNER_VERSION" "$RUNNER_SHA" > "$SEED_MARKER"
         rm -rf "$WORK/release"
     fi
 fi
@@ -434,13 +465,25 @@ fi
 # ---------------------------------------------------------------------------
 step "registration"
 # ---------------------------------------------------------------------------
-# .runner and .credentials are the runner's identity with GitHub. They are
-# created on this host by the runner itself, they are secrets, and this tool
-# neither creates nor reads them.
+# .runner and .credentials are the runner's identity with GitHub, created on
+# this host by the runner itself. This tool creates neither. It reads .runner,
+# which names the repository, runner and work folder, to refuse to start a
+# runner registered as something the profile does not say. .credentials is
+# never opened.
 registration_preexisting_todo=$operator_todo
+registration_wrong=0
 
 if [ -f "$FS_RUNNER_DIR/.runner" ]; then
-    ok "runner is registered"
+    reg_rc=0
+    reg_state=$(host_registration_state "$FS_RUNNER_DIR" "$RUNNER_REPO" "$RUNNER_NAME" "$WORK_DIR") || reg_rc=$?
+    case "$reg_rc" in
+        0) ok "registered as $RUNNER_NAME for $RUNNER_REPO" ;;
+        1) registration_wrong=1
+           fail "the registration does not match the profile: $reg_state"
+           note "  deregister it and register again with the command this prints for an unregistered runner" ;;
+        *) registration_wrong=1
+           fail "cannot read the registration: $reg_state" ;;
+    esac
 else
     registration_required=1
     todo "register the runner, as a person, with a token that expires in an hour:"
@@ -468,14 +511,14 @@ step "systemd units"
 # ---------------------------------------------------------------------------
 # A changed slice takes effect on reload, for every runner in it, without a
 # restart. Only a runner whose own unit changed is restarted.
-host_install_file "$RENDERED_SLICE"   "$UNIT_DIR/$SLICE"   0644 && slice_changed=1
+host_install_file "$RENDERED_SLICE" "$UNIT_DIR/$SLICE" 0644 && slice_changed=1
 
 # A changed unit is not installed under a job. Installing it and deferring
 # only the restart would lose the restart: the next run would find the unit
 # current. Left uninstalled, the difference itself is the pending work, and
 # the next run with the runner idle installs and restarts.
 defer_service=0
-if [ "$CHECK_ONLY" -eq 0 ] && [ -f "$FS_RUNNER_DIR/.runner" ] &&
+if [ -f "$FS_RUNNER_DIR/.runner" ] &&
    ! cmp -s "$RENDERED_SERVICE" "$UNIT_DIR/$SERVICE" 2>/dev/null; then
     job_rc=0
     host_job_state "$SERVICE" || job_rc=$?
@@ -483,12 +526,12 @@ if [ "$CHECK_ONLY" -eq 0 ] && [ -f "$FS_RUNNER_DIR/.runner" ] &&
         0)
             defer_service=1
             late_job_todo=1
-            todo "$SERVICE has a new unit, but a job is running; it was not installed"
+            todo "$SERVICE has a new unit, but a job is running; it waits until the job ends"
             note "  run this again once the job finishes"
             ;;
         2)
             defer_service=1
-            fail "cannot tell whether $SERVICE is running a job; its new unit was not installed"
+            fail "cannot tell whether $SERVICE is running a job; its new unit waits"
             ;;
     esac
 fi
@@ -506,6 +549,8 @@ step "service"
 # ---------------------------------------------------------------------------
 if [ ! -f "$FS_RUNNER_DIR/.runner" ]; then
     note "not registered: unit installed, service left alone"
+elif [ "$registration_wrong" -eq 1 ]; then
+    note "registration does not match: service left as it is"
 elif [ "$(systemctl is-enabled "$SERVICE" 2>/dev/null)" != enabled ]; then
     change "enable and start $SERVICE"
     [ "$CHECK_ONLY" -eq 0 ] && systemctl enable --now "$SERVICE"

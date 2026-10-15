@@ -97,7 +97,7 @@ if [ "$MODE" = all ]; then
     exit 1
 fi
 
-host_preflight "$CONFIG" --root runuser dpkg
+host_preflight "$CONFIG" --root runuser dpkg python3
 
 fabric_validate_fleet "$CONFIG" || { echo "inventory validation failed" >&2; exit 1; }
 
@@ -109,6 +109,8 @@ RUNNER_VERSION=$(fabric_value "$RELEASE" runner-version)
 mapfile -t APT_DEPS < <(fabric_values "$RELEASE" apt-dependency)
 
 SLICE=$(fabric_value "$POLICY" slice)
+RUNNER_REPO=$(fabric_value "$PROFILE" runner-repo)
+RUNNER_NAME=$(fabric_value "$PROFILE" runner-name)
 RUNNER_USER=$(fabric_value "$PROFILE" runner-user)
 RUNNER_HOME=$(fabric_value "$PROFILE" runner-home)
 SERVICE=$(fabric_value "$PROFILE" runner-service)
@@ -292,6 +294,18 @@ for f in .runner .credentials; do
         fail "$f is missing; the runner is not registered"
     fi
 done
+
+# Registered, but as what: the repository, name and work folder the runner
+# recorded must be the profile's. .credentials is not opened.
+if [ -f "$HOST_ROOT$RUNNER_DIR/.runner" ]; then
+    reg_rc=0
+    reg_state=$(host_registration_state "$HOST_ROOT$RUNNER_DIR" "$RUNNER_REPO" "$RUNNER_NAME" "$WORK_DIR") || reg_rc=$?
+    case "$reg_rc" in
+        0) ok "registered as $RUNNER_NAME for $RUNNER_REPO, working in $WORK_DIR" ;;
+        1) fail "the registration does not match the profile: $reg_state" ;;
+        *) fail "cannot read the registration: $reg_state" ;;
+    esac
+fi
 
 # ---------------------------------------------------------------------------
 step "service"
