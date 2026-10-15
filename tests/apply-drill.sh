@@ -48,6 +48,9 @@ expect_out 'registration names the runner and its labels' '--name lab-app-01 --l
 expect_out 'the token travels in the environment' 'sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app'
 expect_no 'the token is never on a command line' '--token'
 expect_no 'a first registration never replaces a runner of the same name' '--unattended --replace'
+# config.sh checks its libraries with ./bin paths before it changes to its own
+# directory; run from elsewhere, that check silently checks nothing.
+expect_out 'registration runs config.sh in the runner directory' 'env -C /var/lib/ci-app/runner HOME=/home/runner-app ./config.sh'
 expect_no 'no token is requested by the tool itself' 'TOKEN=ghs'
 holds 'the verified release is unpacked' [ -x "$H/root/var/lib/ci-app/runner/config.sh" ]
 expect_lines 'the archive was downloaded once' "$H/fake/curl.log" 1
@@ -313,6 +316,7 @@ idle ci-web-2-runner.service
 apply --retire web-2
 expect_rc 'an idle member stops at deregistration' 10
 expect_out 'the deregistration command is printed' 'actions/runners/remove-token'
+expect_out 'deregistration runs config.sh in the runner directory' 'env -C /var/lib/ci-web-2/runner HOME=/home/runner-web-2 ./config.sh remove'
 holds 'it is stopped and disabled first' grep -q '^disable ci-web-2-runner.service' "$H/fake/systemctl.log"
 holds 'its registration is left for the person' [ -e "$H/root/var/lib/ci-web-2/runner/.runner" ]
 
