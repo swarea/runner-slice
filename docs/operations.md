@@ -53,16 +53,22 @@ Every `apply` line is one of:
    never handles it:
 
    ```sh
-   TOKEN=$(gh api -X POST /repos/<owner>/<repo>/actions/runners/registration-token --jq .token)
-   sudo -u runner-app -H env HOME=/home/runner-app /var/lib/ci-app/runner/config.sh \
-       --url https://github.com/<owner>/<repo> --token "$TOKEN" \
+   export ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST /repos/<owner>/<repo>/actions/runners/registration-token --jq .token)"
+   sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app -H \
+       env HOME=/home/runner-app /var/lib/ci-app/runner/config.sh \
+       --url https://github.com/<owner>/<repo> \
        --name <runner-name> --labels <labels> \
        --work /var/lib/ci-app/work --unattended --replace
+   unset ACTIONS_RUNNER_INPUT_TOKEN
    sudo chmod 600 /var/lib/ci-app/runner/.runner /var/lib/ci-app/runner/.credentials /var/lib/ci-app/runner/.credentials_rsaparams
-   unset TOKEN
    ```
 
    Copy the exact command `apply` printed. It has your names and labels in it.
+
+   The token travels in the environment, never as an argument. A command line
+   is logged by sudo and shown by `ps` to every account, and anyone holding
+   the token within its hour can register a runner of their own to the
+   repository.
 
 5. **Apply again.** `apply` confirms that the registration names the profile's
    repository, runner and work folder. Then it enables and starts the

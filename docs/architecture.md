@@ -109,6 +109,7 @@ each unit change.
 | `/etc/systemd/system/<slice>` | root 0644 | apply |
 | `/etc/systemd/system/<prefix>-<id>-runner.service` | root 0644 | apply |
 | `/var/lib/<prefix>-<id>/` | root:<account> 0750 | apply |
+| `/var/lib/<prefix>-<id>/.runner-slice-root` | root | apply, when it creates the runtime root; it names the profile |
 | `/var/lib/<prefix>-<id>/.runner-slice-seeded` | root | apply, after a complete unpack |
 | `/var/lib/<prefix>-<id>/runner/` | <account> 0750 | apply (release), the runner (updates) |
 | `/var/lib/<prefix>-<id>/runner/.runner`, `.credentials*` | <account> 0600 | the runner, at registration by a person |
