@@ -1,6 +1,6 @@
 # 0003: The project is named RunnerSlice
 
-Status: accepted (owner decision, 2026-10-15)
+Status: accepted (owner decision, 2026-10-15), amended the same day
 
 ## Context
 
@@ -32,7 +32,7 @@ or GitHub.
 | Use | Spelling |
 |---|---|
 | Product name in prose | RunnerSlice |
-| Repository, archive, command, configuration directory | `runnerslice` (`swarea/runnerslice`, `runnerslice-<version>.tar.gz`, `/etc/runnerslice`) |
+| Repository, command, archive, configuration directory | `runner-slice` (`swarea/runner-slice`, `runner-slice`, `runner-slice-<version>.tar.gz`, `/etc/runner-slice`) |
 | One-line description | A systemd-native manager for self-hosted GitHub Actions runners. |
 | Unit descriptions | name RunnerSlice, so a unit on a host can be traced to it |
 
@@ -50,3 +50,35 @@ They appear only in descriptions ("for GitHub Actions").
   it where they describe history.
 - No formal trademark search was done. The name was checked for collisions
   on GitHub, PyPI, npm, crates.io and Debian on 2026-10-15, and none was found.
+
+## Amendment (2026-10-15): `runner-slice`, with a hyphen
+
+The repository and command were first spelled `runnerslice`. The owner had
+intended `runner-slice` from the start, and corrected it. The product name
+stays RunnerSlice. Everything a person types or a file is named after is now
+`runner-slice`:
+
+- the repository, `swarea/runner-slice`, renamed with GitHub's rename so
+  that its history, pull requests and settings were kept;
+- the command `bin/runner-slice`;
+- the default configuration directory `/etc/runner-slice`;
+- the seed marker `.runner-slice-seeded`;
+- release archives, `runner-slice-<version>.tar.gz`.
+
+The earlier spelling remains in commits that predate the change.
+
+### The systemd slice is named separately
+
+The hyphenated name is **not** a good name for the runners' slice:
+
+- In a slice unit's name, a dash is hierarchy. `runner-slice.slice` would
+  live inside `runner.slice`. systemd creates that parent implicitly, with no
+  limits of its own, and any other unit could join it.
+- The ceiling is meant to sit directly under the root, beside `system.slice`
+  and `user.slice`.
+
+So the slice stays the operator's declaration (`slice` in `fabric.conf`). The
+documentation recommends a single-word name such as `ci.slice` or
+`runners.slice`. Nested names keep working: the check finds every ancestor
+and refuses an allow list on any of them. But they are a deliberate choice,
+not the default.

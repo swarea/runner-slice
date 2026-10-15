@@ -10,11 +10,11 @@ two sources:
 The diagram shows only what exists.
 
 ```text
-            /etc/runnerslice  (root-owned inventory)
+            /etc/runner-slice  (root-owned inventory)
             fabric.conf  runner-release.conf  profiles/*.conf
                               │
                               ▼
-   bin/runnerslice ──► fabric/fabric-validate.sh ─┐
+   bin/runner-slice ──► fabric/fabric-validate.sh ─┐
         (dispatch)     fabric/fabric-render-…sh  ─┼─► fabric/fabric-lib.sh
                        fabric/fabric-apply.sh   ──┤    validate · derive masks
                        fabric/fabric-check.sh   ──┤    render units · cache
@@ -35,7 +35,7 @@ The diagram shows only what exists.
 
 - **Inventory layer (`fabric/fabric-lib.sh`).** Pure functions of the
   inventory: validation, peer mask derivation and unit rendering. It needs no
-  root and no host, so all of it runs offline (`runnerslice validate`,
+  root and no host, so all of it runs offline (`runner-slice validate`,
   `render`). "Fabric" is the internal name of this layer (decision 0003).
 - **Host layer (`fabric/host-lib.sh`).** The only code that reads the host,
   in two kinds:
@@ -46,7 +46,7 @@ The diagram shows only what exists.
   The roots it reads (`HOST_ROOT`, `CGROUP_ROOT`, `PROC_ROOT`) and the trusted
   owner are fixed in the file. The environment can never set them.
 - **Entry scripts.** `fabric-apply.sh` converges, `fabric-check.sh` proves,
-  and `fabric-status.sh` asks GitHub. `bin/runnerslice` only translates a
+  and `fabric-status.sh` asks GitHub. `bin/runner-slice` only translates a
   subcommand into one of them.
 
 ## Decisions that shape the code
@@ -109,7 +109,7 @@ each unit change.
 | `/etc/systemd/system/<slice>` | root 0644 | apply |
 | `/etc/systemd/system/<prefix>-<id>-runner.service` | root 0644 | apply |
 | `/var/lib/<prefix>-<id>/` | root:<account> 0750 | apply |
-| `/var/lib/<prefix>-<id>/.runnerslice-seeded` | root | apply, after a complete unpack |
+| `/var/lib/<prefix>-<id>/.runner-slice-seeded` | root | apply, after a complete unpack |
 | `/var/lib/<prefix>-<id>/runner/` | <account> 0750 | apply (release), the runner (updates) |
 | `/var/lib/<prefix>-<id>/runner/.runner`, `.credentials*` | <account> 0600 | the runner, at registration by a person |
 | `/var/lib/<prefix>-<id>/work/` | <account> 0750 | the runner (jobs) |
