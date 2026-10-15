@@ -92,7 +92,7 @@ echo 'common-mask      -/srv/other-app' >> "$H/config/fabric.conf"
 busy ci-app-runner.service
 apply --profile app
 expect_rc 'a busy runner does not fail the apply' 0
-expect_out 'the deferred unit is an operator action' 'has a new unit, but a job is running; it was not installed'
+expect_out 'the deferred unit is an operator action' 'has a new unit, but a job is running; it waits until the job ends'
 refutes 'a busy runner is not restarted' grep -q '^restart' "$H/fake/systemctl.log"
 refutes 'the new unit waits for the job' is_rendered "$H/$UNITS/ci-app-runner.service" app
 
@@ -108,7 +108,7 @@ apply --profile app
 expect_rc 'a runner whose job state cannot be read fails the apply' 1
 expect_out 'it says why' 'cannot tell whether ci-app-runner.service is running a job'
 expect_lines 'and is not restarted' <(grep '^restart' "$H/fake/systemctl.log") 1
-expect_out 'its new unit is not installed' 'its new unit was not installed'
+expect_out 'its new unit is not installed' 'its new unit waits'
 refutes 'the installed unit is still the old one' is_rendered "$H/$UNITS/ci-app-runner.service" app
 rm -rf "$H/proc/4200"
 idle ci-app-runner.service
@@ -124,6 +124,80 @@ apply --profile app
 expect_rc 'a digest mismatch fails' 1
 expect_out 'and says so' 'digest mismatch; refusing to unpack'
 refutes 'nothing was unpacked' [ -e "$H/root/var/lib/ci-app/runner/config.sh" ]
+
+# ---------------------------------------------------------------------------
+echo
+echo '== one runner: an interrupted unpack is completed, not trusted =='
+# ---------------------------------------------------------------------------
+new_host interrupted
+only app
+apply --profile app
+rm -f "$H/root/var/lib/ci-app/.runnerslice-seeded" "$H/root/var/lib/ci-app/runner/bin/runsvc.sh"
+apply --profile app --check
+expect_out 'the plan names the unfinished unpack' 'complete an interrupted unpack'
+apply --profile app
+expect_rc 'the unpack is completed' 0
+expect_lines 'the archive was fetched again' "$H/fake/curl.log" 2
+holds 'the missing file is restored' [ -x "$H/root/var/lib/ci-app/runner/bin/runsvc.sh" ]
+holds 'the seed marker records the release' grep -q '^2.338.0 ' "$H/root/var/lib/ci-app/.runnerslice-seeded"
+
+# ---------------------------------------------------------------------------
+echo
+echo '== one runner: what RunnerSlice did not write is not taken over =='
+# ---------------------------------------------------------------------------
+new_host foreign
+only app
+mkdir -p "$H/$UNITS"
+printf '[Unit]\nDescription=somebody else\n' > "$H/$UNITS/ci-app-runner.service"
+before=$(snapshot)
+apply --profile app
+expect_rc 'a foreign unit of the same name stops the profile' 1
+expect_out 'it is named' 'ci-app-runner.service exists and was not written by RunnerSlice'
+expect_same 'nothing was created beside it' "$before"
+rm -f "$H/$UNITS/ci-app-runner.service"
+
+printf '[Slice]\nCPUQuota=10%%\n' > "$H/$UNITS/ci.slice"
+apply --profile app
+expect_rc 'a foreign slice of the same name stops the profile' 1
+holds 'the foreign slice is untouched' grep -q '^CPUQuota=10%$' "$H/$UNITS/ci.slice"
+rm -f "$H/$UNITS/ci.slice"
+
+apply --profile app
+register app
+apply --profile app
+expect_rc 'the profile converges once the names are free' 0
+
+# A registration that names another repository, runner or work folder is a
+# runner the profile does not describe; it is not started.
+new_host misregistered
+only app
+apply --profile app
+register app
+sed -i 's#"gitHubUrl": "[^"]*"#"gitHubUrl": "https://github.com/example-org/elsewhere"#' \
+    "$H/root/var/lib/ci-app/runner/.runner"
+apply --profile app
+expect_rc 'a registration for another repository fails' 1
+expect_out 'it says what differs' 'repository is https://github.com/example-org/elsewhere'
+expect_lines 'the runner is not started' "$H/fake/enabled" 0
+printf 'not json' > "$H/root/var/lib/ci-app/runner/.runner"
+apply --profile app
+expect_out 'an unreadable registration fails closed' 'cannot read the registration'
+expect_lines 'and is not started either' "$H/fake/enabled" 0
+register app
+apply --profile app
+expect_rc 'the corrected registration starts' 0
+expect_lines 'the runner is started' "$H/fake/enabled" 1
+
+# The plan says what the run would do with a busy runner: wait.
+echo 'common-mask      -/srv/plan-app' >> "$H/config/fabric.conf"
+busy ci-app-runner.service
+before=$(snapshot)
+apply --profile app --check
+expect_rc 'a plan with a busy runner reports outstanding work' 1
+expect_out 'it says the unit waits for the job' 'it waits until the job ends'
+expect_no 'it does not promise a restart' 'CHANGE  restart'
+expect_same 'the plan changes nothing' "$before"
+idle ci-app-runner.service
 
 # ---------------------------------------------------------------------------
 echo
@@ -181,11 +255,17 @@ expect_out 'the refusal names it' 'not in this inventory: ci-old-runner.service'
 expect_same 'the refused fleet changed nothing' "$before"
 rm -f "$H/$UNITS/ci-old-runner.service"
 
-# A unit outside the declared prefix is not this tool's to judge.
+# A unit outside the declared prefix, or one RunnerSlice did not write,
+# is not this tool's to judge.
 : > "$H/$UNITS/cinder-runner.service"
 apply --all
 expect_rc 'a unit outside the name-prefix is left alone' 0
 rm -f "$H/$UNITS/cinder-runner.service"
+printf '[Unit]\nDescription=hand-made\n' > "$H/$UNITS/ci-handmade-runner.service"
+apply --all
+expect_rc 'an unmarked unit inside the prefix is not an orphan' 0
+holds 'and is left alone' grep -q 'hand-made' "$H/$UNITS/ci-handmade-runner.service"
+rm -f "$H/$UNITS/ci-handmade-runner.service"
 
 # ---------------------------------------------------------------------------
 echo
