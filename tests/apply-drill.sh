@@ -42,7 +42,7 @@ expect_out 'the plan names the download' 'CHANGE  download and unpack'
 expect_same 'a plan changes nothing' "$before"
 
 apply --profile app
-expect_rc 'a fresh apply succeeds with the registration left to a person' 0
+expect_rc 'a fresh apply is not converged while registration is left to a person' 1
 expect_out 'the registration command is printed' 'actions/runners/registration-token'
 expect_out 'registration names the runner and its labels' '--name lab-app-01 --labels lab,app'
 expect_no 'no token is requested by the tool itself' 'TOKEN=ghs'
@@ -91,7 +91,7 @@ refutes 'a slice change restarts no runner' grep -q '^restart' "$H/fake/systemct
 echo 'common-mask      -/srv/other-app' >> "$H/config/fabric.conf"
 busy ci-app-runner.service
 apply --profile app
-expect_rc 'a busy runner does not fail the apply' 0
+expect_rc 'a unit waiting for a job leaves the apply unconverged' 1
 expect_out 'the deferred unit is an operator action' 'has a new unit, but a job is running; it waits until the job ends'
 refutes 'a busy runner is not restarted' grep -q '^restart' "$H/fake/systemctl.log"
 refutes 'the new unit waits for the job' is_rendered "$H/$UNITS/ci-app-runner.service" app
@@ -136,7 +136,9 @@ rm -f "$H/root/var/lib/ci-app/.runnerslice-seeded" "$H/root/var/lib/ci-app/runne
 apply --profile app --check
 expect_out 'the plan names the unfinished unpack' 'complete an interrupted unpack'
 apply --profile app
-expect_rc 'the unpack is completed' 0
+expect_out 'the unpack is completed' 'archive digest verified'
+expect_rc 'and the run waits only for registration' 1
+expect_out 'registration is the outstanding step' 'register the runner, as a person'
 expect_lines 'the archive was fetched again' "$H/fake/curl.log" 2
 holds 'the missing file is restored' [ -x "$H/root/var/lib/ci-app/runner/bin/runsvc.sh" ]
 holds 'the seed marker records the release' grep -q '^2.338.0 ' "$H/root/var/lib/ci-app/.runnerslice-seeded"
