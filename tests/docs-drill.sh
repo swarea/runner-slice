@@ -2,9 +2,10 @@
 #
 # The documentation describes this code, not an older one:
 #   - every relative link in a Markdown file resolves;
-#   - every `runnerslice <command>` the documents use exists;
+#   - every `runner-slice <command>` the documents use exists;
 #   - the configuration reference lists exactly the keys the code accepts,
 #     in each file, in both directions;
+#   - the retired unhyphenated spelling appears only in decision 0003;
 #   - the example inventory validates.
 set -uo pipefail
 
@@ -42,13 +43,13 @@ for doc in docs:
 result(not broken, f"every relative link in {len(docs)} documents resolves" + (f": {broken}" if broken else ""))
 
 # Commands.
-cli = (root / "bin/runnerslice").read_text()
+cli = (root / "bin/runner-slice").read_text()
 known = set(re.findall(r"^    ([a-z]+)(?:\|[a-z-]+)*\)", cli, re.M))
 used = set()
 for doc in docs:
-    used |= set(re.findall(r"runnerslice(?: \[?--config [A-Z]+\]?)? ([a-z]+)\b", doc.read_text()))
+    used |= set(re.findall(r"runner-slice(?: \[?--config [A-Z]+\]?)? ([a-z]+)\b", doc.read_text()))
 unknown = sorted(used - known - {"is", "was", "has", "and", "or", "the", "on", "in", "inventory"})
-result(not unknown, f"every runnerslice command the documents use exists ({len(used & known)} used)" + (f": unknown {unknown}" if unknown else ""))
+result(not unknown, f"every runner-slice command the documents use exists ({len(used & known)} used)" + (f": unknown {unknown}" if unknown else ""))
 
 # Configuration keys.
 lib = (root / "fabric/fabric-lib.sh").read_text()
@@ -80,8 +81,23 @@ for name, heading, code in [
     result(doc == code, f"{name}: the reference lists exactly the {len(code)} keys the code accepts"
            + ("" if doc == code else f" (undocumented {sorted(code - doc)}, not in code {sorted(doc - code)})"))
 
+# The old spelling, built from parts so this file does not contain it. Only
+# the decision record that tells its history may use
+# it; everything a person types or a file is named after is runner-slice.
+stale = []
+for path in sorted(p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts):
+    if path.name.startswith("0003-name-"):
+        continue
+    try:
+        text = path.read_text()
+    except UnicodeDecodeError:
+        continue
+    if re.search(r"(?<![A-Za-z])" + "runner" + "slice", text):
+        stale.append(str(path.relative_to(root)))
+result(not stale, "the retired spelling appears only in decision 0003" + (f": {stale}" if stale else ""))
+
 # Example inventory.
-r = subprocess.run(["bash", str(root / "bin/runnerslice"), "--config", str(root / "examples/basic"), "validate"],
+r = subprocess.run(["bash", str(root / "bin/runner-slice"), "--config", str(root / "examples/basic"), "validate"],
                    capture_output=True, text=True)
 result(r.returncode == 0, "the example inventory validates")
 
