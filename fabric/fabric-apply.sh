@@ -4,7 +4,7 @@
 #
 #     fabric-apply.sh --config DIR --all [--check]           the whole fleet
 #     fabric-apply.sh --config DIR --profile ID [--check]    one runner
-#     fabric-apply.sh --config DIR --retire ID [--check]     take a pool member out
+#     fabric-apply.sh --config DIR --retire ID [--check]     take a runner out
 #
 # --check reports what would change and changes nothing. Run as root.
 #
@@ -231,7 +231,7 @@ units_changed=0
 registration_required=0
 
 # ---------------------------------------------------------------------------
-# Retiring a pool member
+# Retiring a runner
 # ---------------------------------------------------------------------------
 # Run while the inventory still names the member, so every tool still sees
 # it. Each step happens only once the one before it is true, and a re-run
@@ -243,24 +243,20 @@ registration_required=0
 #                                  until the registration files are gone
 #   4. unit, runtime root, account removed
 #
-# Only an added pool member can be retired this way. A pool's first runner
-# and single-runner profiles are not something this removes.
+# Any runner can be retired, a pool member or not. Afterwards its profile is
+# deleted from the inventory and the remaining runners applied, which drops
+# the mask for its runtime root from their units.
 if [ "$MODE" = retire ]; then
-    pool=$(fabric_value "$PROFILE" runner-pool)
-    if [ -z "$pool" ] || [ "$PROFILE_ID" = "$pool" ]; then
-        echo "--retire takes an added pool member; $PROFILE_ID is not one" >&2
-        exit 2
-    fi
-
     step "retire $PROFILE_ID: no job in flight"
     job_rc=0
     host_job_state "$SERVICE" || job_rc=$?
     case "$job_rc" in
         0)
             fail "$PROFILE_ID has a job in flight; nothing was changed"
-            note "  drain it first, so GitHub sends it nothing new, and wait for the job:"
+            note "  drain it first: with its custom labels removed, GitHub sends it nothing new"
             note "  RID=\$(gh api /repos/$RUNNER_REPO/actions/runners --jq '.runners[] | select(.name==\"$RUNNER_NAME\") | .id')"
-            note "  gh api -X DELETE /repos/$RUNNER_REPO/actions/runners/\$RID/labels/$pool"
+            note "  gh api -X DELETE /repos/$RUNNER_REPO/actions/runners/\$RID/labels"
+            note "  then wait for the job to finish, and run --retire $PROFILE_ID again"
             host_report_apply
             ;;
         2)
@@ -315,20 +311,20 @@ if [ "$MODE" = retire ]; then
     else
         if [ -e "$UNIT_DIR/$SERVICE" ] && ! fabric_unit_is_ours "$UNIT_DIR/$SERVICE"; then
             fail "refusing to remove $UNIT_DIR/$SERVICE: it was not written by RunnerSlice"
-        elif host_remove_file "$UNIT_DIR/$SERVICE" "retired pool member" &&
+        elif host_remove_file "$UNIT_DIR/$SERVICE" "retired runner" &&
              [ "$CHECK_ONLY" -eq 0 ]; then
             systemctl daemon-reload
         fi
-        # Validation already proved the root is /var/lib/<prefix>-<id> and
+        # Validation already proved the root is /var/lib/<prefix>[-<id>] and
         # unique in the fleet; this is the last guard before rm -rf.
         own_root_ok=1
-        case "$INSTALL_ROOT" in /var/lib/"$NAME_PREFIX"-?*) ;; *) own_root_ok=0 ;; esac
+        case "$INSTALL_ROOT" in /var/lib/"$NAME_PREFIX"|/var/lib/"$NAME_PREFIX"-?*) ;; *) own_root_ok=0 ;; esac
         while IFS= read -r peer; do
             [ "$peer" = "$PROFILE" ] && continue
             [ "$(fabric_value "$peer" install-root)" = "$INSTALL_ROOT" ] && own_root_ok=0
         done < <(fabric_profiles "$CONFIG")
         if [ "$own_root_ok" -ne 1 ]; then
-            fail "refusing to remove $INSTALL_ROOT: it is not this member's own runtime root"
+            fail "refusing to remove $INSTALL_ROOT: it is not this runner's own runtime root"
         elif [ -e "$FS_INSTALL_ROOT" ]; then
             change "remove $INSTALL_ROOT"
             [ "$CHECK_ONLY" -eq 0 ] && rm -rf --one-file-system -- "$FS_INSTALL_ROOT"
@@ -336,8 +332,8 @@ if [ "$MODE" = retire ]; then
             ok "$INSTALL_ROOT is absent"
         fi
         host_remove_user "$RUNNER_USER"
-        note "retired. Now remove $PROFILE_ID and its runner-pool line from the"
-        note "inventory and run --all with every runner idle."
+        note "retired. Now delete profiles/$PROFILE_ID.conf and run --all with the other"
+        note "runners idle: their units drop the mask for $INSTALL_ROOT."
     fi
 
     host_report_apply
