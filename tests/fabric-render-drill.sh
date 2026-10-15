@@ -174,7 +174,7 @@ echo '== slice rendering =='
 
 if diff <(fabric_render_slice "$CI_DIR") - <<'SLICE'
 [Unit]
-Description=GitHub Actions runners managed by runner-fabric
+Description=GitHub Actions runners managed by RunnerSlice
 
 [Slice]
 CPUAccounting=yes
