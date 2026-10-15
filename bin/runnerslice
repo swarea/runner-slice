@@ -26,7 +26,7 @@ On the host, as root:
   plan [PROFILE]        show what apply would change; change nothing
   apply [PROFILE]       converge one profile, or every profile
   retire PROFILE [--check]
-                        take an added pool member out, one safe step per run
+                        take a runner out, one safe step per run
   check [PROFILE]       read-only conformance of the running host
 
 From GitHub, as an ordinary user with an authenticated gh:
