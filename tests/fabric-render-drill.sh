@@ -173,6 +173,7 @@ echo
 echo '== slice rendering =='
 
 if diff <(fabric_render_slice "$CI_DIR") - <<'SLICE'
+# Managed by RunnerSlice. Changes here are replaced on the next apply.
 [Unit]
 Description=GitHub Actions runners managed by RunnerSlice
 
