@@ -65,6 +65,8 @@ conform() { # ID PID
     prop "$svc" ProtectSystem full
     prop "$svc" ProtectHome tmpfs
     prop "$svc" MainPID "$pid"
+    # As systemd 255 prints it: yes for baseline, no for userns.
+    if [ "$id" = docs ]; then prop "$svc" RestrictNamespaces no; else prop "$svc" RestrictNamespaces yes; fi
     mountinfo "$id" "$pid"
 }
 
@@ -104,7 +106,7 @@ expect_out 'the declared mask is proven in the namespace' 'masked in namespace: 
 expect_out 'a peer runtime root is proven masked' 'masked in namespace: /var/lib/ci-docs'
 expect_out 'the home namespace is proven' 'exposes only its own home'
 expect_out 'the protected path is proven unreadable' 'runner-app cannot read /srv/example-app/.env'
-expect_out 'the baseline sandbox is checked' 'RestrictNamespaces='
+expect_out 'the baseline sandbox is checked' 'RestrictNamespaces=yes'
 
 check --all
 expect_pass 'the converged fleet passes'
@@ -247,14 +249,20 @@ refutes 'the runner binary was never executed by check' [ -e "$H/fake/listener-e
 echo
 echo '== service and namespace =='
 # ---------------------------------------------------------------------------
-prop ci-app-runner.service RestrictNamespaces 'cgroup ipc mnt net pid user uts'
+prop ci-app-runner.service RestrictNamespaces no
 check --profile app
-expect_fail 'a baseline runner allowed namespaces fails' 'RestrictNamespaces is'
-rm -f "$H/fake/props/ci-app-runner.service/RestrictNamespaces"
+expect_fail 'a baseline runner allowed namespaces fails' "RestrictNamespaces is 'no', expected 'yes'"
+prop ci-app-runner.service RestrictNamespaces 'net user'
+check --profile app
+expect_fail 'a baseline runner allowed some namespaces fails' "RestrictNamespaces is 'net user', expected 'yes'"
+prop ci-app-runner.service RestrictNamespaces yes
 
-prop ci-docs-runner.service RestrictNamespaces 'cgroup ipc mnt net pid user uts'
 check --profile docs
 expect_pass 'a userns runner may create namespaces'
+prop ci-docs-runner.service RestrictNamespaces yes
+check --profile docs
+expect_fail 'a userns runner that cannot is drift too' "RestrictNamespaces is 'yes', expected 'no'"
+prop ci-docs-runner.service RestrictNamespaces no
 
 mountinfo app 5001 /srv/example-app
 check --profile app

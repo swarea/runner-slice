@@ -323,10 +323,12 @@ host_expect_property "$SERVICE" PrivateTmp         yes
 host_expect_property "$SERVICE" ProtectSystem      full
 host_expect_property "$SERVICE" ProtectHome        tmpfs
 host_expect_property "$SERVICE" SupplementaryGroups ""
-# systemd prints the namespaces a unit may still create; an empty list is
-# RestrictNamespaces=yes.
+# systemd 255 prints RestrictNamespaces as yes, no, or the namespace types a
+# unit may still create (observed on the ARM64 acceptance VM). baseline is
+# yes; userns is no. Anything else is drift.
 case "$SANDBOX" in
-    baseline) host_expect_property "$SERVICE" RestrictNamespaces "" ;;
+    baseline) host_expect_property "$SERVICE" RestrictNamespaces yes ;;
+    userns)   host_expect_property "$SERVICE" RestrictNamespaces no ;;
 esac
 
 # ---------------------------------------------------------------------------
