@@ -26,7 +26,7 @@ trap 'rm -rf "$T"' EXIT
 git clone -q "$ROOT" "$T/src"
 git -C "$T/src" checkout -q "$(git -C "$ROOT" rev-parse HEAD)"
 version=$(cat "$T/src/VERSION")
-name="runnerslice-$version"
+name="runner-slice-$version"
 
 echo '== refusals =='
 echo 'local change' >> "$T/src/VERSION"
@@ -93,7 +93,7 @@ else
     fail 'tests/run.sh fails inside the unpacked archive'
     printf '%s\n' "$out" | grep -E 'FAIL|result' | head >&2
 fi
-if "$T/unpacked/$name/bin/runnerslice" --config "$T/unpacked/$name/examples/basic" validate >/dev/null; then
+if "$T/unpacked/$name/bin/runner-slice" --config "$T/unpacked/$name/examples/basic" validate >/dev/null; then
     pass 'the unpacked command validates the example inventory'
 else
     fail 'the unpacked command does not validate the example inventory'
