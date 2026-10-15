@@ -122,11 +122,38 @@ fabric_profiles() {
         -type f \
         -name '*.conf' \
         -print |
-        sort
+        LC_ALL=C sort
 }
 
 fabric_error() {
     printf 'ERROR: %s\n' "$*" >&2
+}
+
+# fabric_size_bytes SIZE   a systemd size (bytes, or K/M/G/T, base 1024)
+fabric_size_bytes() {
+    local size=$1
+    case "$size" in
+        *K) echo $(( ${size%K} * 1024 )) ;;
+        *M) echo $(( ${size%M} * 1024 * 1024 )) ;;
+        *G) echo $(( ${size%G} * 1024 * 1024 * 1024 )) ;;
+        *T) echo $(( ${size%T} * 1024 * 1024 * 1024 * 1024 )) ;;
+        *)  echo "$size" ;;
+    esac
+}
+
+# fabric_slice_ancestors SLICE   the slices above SLICE, outermost first
+#
+# A dash in a slice name is hierarchy: a-b.slice lives inside a.slice. An
+# allow list on any of them is consulted before the slice's deny list, so the
+# check has to look at every one.
+fabric_slice_ancestors() {
+    local name=${1%.slice} prefix="" part
+    local -a parts=()
+    IFS=- read -r -a parts <<<"$name"
+    for part in "${parts[@]:0:${#parts[@]}-1}"; do
+        prefix=${prefix:+$prefix-}$part
+        printf '%s.slice\n' "$prefix"
+    done
 }
 
 fabric_validate_release() {
@@ -234,7 +261,9 @@ fabric_validate_policy() {
     while read -r key _; do
         [ -n "${key:-}" ] || continue
         case "$key" in
-            resource-class|sandbox-class|common-mask|slice|name-prefix|user-prefix|host-label)
+            resource-class|sandbox-class|common-mask|slice|name-prefix|user-prefix|host-label|protected-path|host-name)
+                ;;
+            slice-cpu-quota|slice-memory-max|slice-memory-high|slice-tasks-max|slice-cpu-weight|slice-ip-deny)
                 ;;
             *)
                 fabric_error "$file: unknown policy key $key"
@@ -274,6 +303,85 @@ fabric_validate_policy() {
         fabric_error "$file: invalid host-label '$(fabric_value "$file" host-label)'"
         failed=1
     }
+
+    # Optional: the hostname this configuration is for, so applying it on
+    # the wrong machine is refused before anything changes.
+    if [ "$(fabric_key_count "$file" host-name)" -gt 1 ]; then
+        fabric_error "$file: host-name may appear at most once"
+        failed=1
+    elif [ "$(fabric_key_count "$file" host-name)" -eq 1 ] &&
+         ! [[ "$(fabric_value "$file" host-name)" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]]; then
+        fabric_error "$file: invalid host-name '$(fabric_value "$file" host-name)'"
+        failed=1
+    fi
+
+    # The slice's limits are the ceiling every runner shares. There are no
+    # defaults: a number that suits one host starves or overcommits another,
+    # so each host declares its own.
+    for single in slice-cpu-quota slice-memory-max slice-tasks-max; do
+        if [ "$(fabric_key_count "$file" "$single")" -ne 1 ]; then
+            fabric_error "$file: $single must appear exactly once (got $(fabric_key_count "$file" "$single"))"
+            failed=1
+        fi
+    done
+    for single in slice-memory-high slice-cpu-weight; do
+        if [ "$(fabric_key_count "$file" "$single")" -gt 1 ]; then
+            fabric_error "$file: $single may appear at most once"
+            failed=1
+        fi
+    done
+    local quota mem_max mem_high tasks weight addr
+    quota=$(fabric_value "$file" slice-cpu-quota)
+    mem_max=$(fabric_value "$file" slice-memory-max)
+    mem_high=$(fabric_value "$file" slice-memory-high)
+    tasks=$(fabric_value "$file" slice-tasks-max)
+    weight=$(fabric_value "$file" slice-cpu-weight)
+    [[ "$quota" =~ ^[1-9][0-9]*%$ ]] || {
+        fabric_error "$file: slice-cpu-quota '$quota' must be a percentage such as 150%"
+        failed=1
+    }
+    [[ "$mem_max" =~ ^[1-9][0-9]*[KMGT]?$ ]] || {
+        fabric_error "$file: slice-memory-max '$mem_max' must be bytes or a K/M/G/T size"
+        failed=1
+    }
+    if [ -n "$mem_high" ]; then
+        if ! [[ "$mem_high" =~ ^[1-9][0-9]*[KMGT]?$ ]]; then
+            fabric_error "$file: slice-memory-high '$mem_high' must be bytes or a K/M/G/T size"
+            failed=1
+        elif [[ "$mem_max" =~ ^[1-9][0-9]*[KMGT]?$ ]] &&
+             [ "$(fabric_size_bytes "$mem_high")" -gt "$(fabric_size_bytes "$mem_max")" ]; then
+            fabric_error "$file: slice-memory-high $mem_high is above slice-memory-max $mem_max"
+            failed=1
+        fi
+    fi
+    [[ "$tasks" =~ ^[1-9][0-9]*$ ]] || {
+        fabric_error "$file: slice-tasks-max '$tasks' must be a positive integer"
+        failed=1
+    }
+    if [ -n "$weight" ] &&
+       ! { [[ "$weight" =~ ^[1-9][0-9]*$ ]] && [ "$weight" -le 10000 ]; }; then
+        fabric_error "$file: slice-cpu-weight '$weight' must be 1 to 10000"
+        failed=1
+    fi
+    while IFS= read -r addr; do
+        [ -n "$addr" ] || continue
+        [[ "$addr" =~ ^[0-9A-Fa-f:.]+(/[0-9]{1,3})?$ ]] || {
+            fabric_error "$file: slice-ip-deny '$addr' is not an address or prefix"
+            failed=1
+        }
+    done < <(fabric_values "$file" slice-ip-deny)
+
+    # A protected path is one the runner accounts must not be able to read
+    # even outside their service, for example from a login shell. The check
+    # proves it; nothing here changes permissions.
+    local protected
+    while IFS= read -r protected; do
+        [ -n "$protected" ] || continue
+        [[ "$protected" =~ ^/[^[:space:]]*$ ]] || {
+            fabric_error "$file: protected-path '$protected' must be an absolute path"
+            failed=1
+        }
+    done < <(fabric_values "$file" protected-path)
 
     # Only the Docker socket is mandatory everywhere: access to it is root on
     # the host. Which other paths a runner must not see is the operator's
@@ -812,4 +920,33 @@ UNIT
     # to repeat its own file name. Keeping it here makes an incomplete caller
     # fail while rendering rather than producing plausible output.
     [ -n "$service" ]
+}
+
+# fabric_render_slice CI_DIR
+#
+# The slice every runner joins, rendered from the policy. Accounting is always
+# on so the check can read what the runners use.
+fabric_render_slice() {
+    local file="$1/fabric.conf" value
+
+    cat <<'UNIT'
+[Unit]
+Description=GitHub Actions runners managed by runner-fabric
+
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+TasksAccounting=yes
+UNIT
+    printf 'CPUQuota=%s\n' "$(fabric_value "$file" slice-cpu-quota)"
+    value=$(fabric_value "$file" slice-memory-high)
+    [ -z "$value" ] || printf 'MemoryHigh=%s\n' "$value"
+    printf 'MemoryMax=%s\n' "$(fabric_value "$file" slice-memory-max)"
+    printf 'TasksMax=%s\n' "$(fabric_value "$file" slice-tasks-max)"
+    value=$(fabric_value "$file" slice-cpu-weight)
+    [ -z "$value" ] || printf 'CPUWeight=%s\n' "$value"
+    while IFS= read -r value; do
+        [ -n "$value" ] && printf 'IPAddressDeny=%s\n' "$value"
+    done < <(fabric_values "$file" slice-ip-deny)
+    return 0
 }

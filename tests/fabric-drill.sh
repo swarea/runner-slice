@@ -647,6 +647,43 @@ policy_reject 'a host-label with a path separator is rejected' \
     's#^host-label[[:space:]].*#host-label       lab/1#'
 
 echo
+echo '== declared slice limits and host policy =='
+
+# No limit has a default, so each one missing is its own refusal.
+for key in slice-cpu-quota slice-memory-max slice-tasks-max; do
+    policy_reject "a missing $key is rejected" \
+        "$key must appear exactly once (got 0)" "/^${key}[[:space:]]/d"
+done
+policy_reject 'a quota that is not a percentage is rejected' \
+    "slice-cpu-quota '1.5' must be a percentage" \
+    's/^slice-cpu-quota[[:space:]].*/slice-cpu-quota     1.5/'
+policy_reject 'a memory size systemd would not read is rejected' \
+    "slice-memory-max '2GB' must be bytes or a K/M/G/T size" \
+    's/^slice-memory-max[[:space:]].*/slice-memory-max    2GB/'
+policy_reject 'a soft memory limit above the hard one is rejected' \
+    'slice-memory-high 3G is above slice-memory-max 2G' \
+    's/^slice-memory-high[[:space:]].*/slice-memory-high   3G/'
+policy_reject 'a zero task limit is rejected' \
+    "slice-tasks-max '0' must be a positive integer" \
+    's/^slice-tasks-max[[:space:]].*/slice-tasks-max     0/'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+policy_reject 'a CPU weight outside systemd range is rejected' \
+    "slice-cpu-weight '20000' must be 1 to 10000" '$a slice-cpu-weight    20000'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+policy_reject 'a deny entry that is not an address is rejected' \
+    "slice-ip-deny 'metadata' is not an address or prefix" '$a slice-ip-deny       metadata'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+policy_reject 'a relative protected path is rejected' \
+    "protected-path 'srv/app/.env' must be an absolute path" '$a protected-path      srv/app/.env'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+policy_reject 'an invalid host-name is rejected' \
+    "invalid host-name 'build 01'" '$a host-name           build 01'
+# shellcheck disable=SC2016 # a sed script: \$a is sed's, not the shell's
+policy_reject 'a repeated host-name is rejected' \
+    'host-name may appear at most once' '$a host-name a
+$a host-name b'
+
+echo
 echo '== source immutability =='
 
 AFTER_SHA="$(
