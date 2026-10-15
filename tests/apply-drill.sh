@@ -321,6 +321,38 @@ apply --all
 expect_rc 'the remaining inventory converges' 0
 refutes "the remaining units no longer mask the retired root" grep -q 'InaccessiblePaths=/var/lib/ci-app$' "$H/$UNITS/ci-docs-runner.service"
 
+# Every runner retired: what is left is exactly the slice unit, which goes
+# when RunnerSlice itself is removed, and the inventory. No runner unit,
+# runtime root, account, enabled service or running process remains.
+for id in docs web; do
+    apply --retire "$id"
+    expect_rc "$id stops at deregistration" 10
+    rm -f "$H/root/var/lib/ci-$id/runner/.runner" "$H/root/var/lib/ci-$id/runner/.credentials"
+    if [ "$id" = docs ]; then
+        # A unit someone else put in place of RunnerSlice's is not removed.
+        cp "$H/$UNITS/ci-docs-runner.service" "$T/docs.saved"
+        printf '[Unit]\nDescription=replaced by hand\n' > "$H/$UNITS/ci-docs-runner.service"
+        apply --retire docs
+        expect_rc 'retirement refuses a unit RunnerSlice did not write' 1
+        holds 'and leaves that unit in place' grep -q 'replaced by hand' "$H/$UNITS/ci-docs-runner.service"
+        cp "$T/docs.saved" "$H/$UNITS/ci-docs-runner.service"
+    fi
+    apply --retire "$id"
+    expect_rc "$id is removed" 0
+done
+# *.owner files are the fixture's record of ownership, not host files.
+leftover=$(cd "$H/root" && find . -mindepth 1 \( -type f -o -type l \) ! -name '*.owner' | LC_ALL=C sort | paste -sd' ' -)
+if [ "$leftover" = "./etc/systemd/system/ci.slice" ]; then
+    pass 'after the last runner only the slice unit remains on the host'
+else
+    fail "files remain after the last runner: $leftover"
+fi
+holds 'and it is the one RunnerSlice wrote' is_rendered "$H/$UNITS/ci.slice" slice
+expect_lines 'no runtime root remains' <(find "$H/root/var/lib" -mindepth 1 -maxdepth 1 -type d) 0
+refutes 'no runner account remains' compgen -G "$H/fake/user-*"
+expect_lines 'no service is enabled' "$H/fake/enabled" 0
+expect_lines 'no service is active' "$H/fake/active" 0
+
 # ---------------------------------------------------------------------------
 echo
 echo '== source integrity =='
