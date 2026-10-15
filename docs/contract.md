@@ -1,6 +1,7 @@
 # Product contract
 
-Working title: **runner-fabric** (the name is not final; see "Open decisions").
+**RunnerSlice**: a systemd-native manager for self-hosted GitHub Actions runners.
+The name and its spelling are recorded in decision 0003.
 
 This document is the single statement of what the project is, what it is not,
 and what has to be true before each release stage. Other documents link here
@@ -246,10 +247,11 @@ The version follows the evidence. No stage is skipped to reach a number.
 
 ## Open decisions (owner)
 
-- **Name.** The working title is used until decided.
-- **Licence.** MIT is proposed, matching the organisation's other public
-  project.
-- **Public repository creation and visibility timing.**
+Decided on 2026-10-15: the name (decision 0003), the MIT licence, and a
+private `swarea/runnerslice` repository with rebase-only merges. Still open:
+
+- **Public visibility.** When the repository is made public, which is a
+  separate owner approval.
 - **Test VM.** Where it runs and with what resources. It must be separate from
   production.
 - **Private dogfood repository.** Its creation, and the one-hour registration

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate a runner-fabric inventory: policy, release seed and every profile,
+# Validate a RunnerSlice inventory: policy, release seed and every profile,
 # as one fleet. Offline: no root, no GitHub, no live host state.
 #
 #     fabric-validate.sh CONFIG_DIR
@@ -21,7 +21,7 @@ CONFIG_DIR=$1
 
 fabric_validate_fleet "$CONFIG_DIR"
 
-echo 'runner-fabric inventory: valid'
+echo 'RunnerSlice inventory: valid'
 
 while IFS= read -r profile; do
     id=$(fabric_value "$profile" profile-id)
