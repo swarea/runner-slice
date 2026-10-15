@@ -35,9 +35,9 @@ Any way, with RunnerSlice configured as documented, for:
 - a job to escape the slice's CPU, memory or task limits;
 - an unprivileged account to change what RunnerSlice runs as root, or the
   configuration it acts on;
-- `runnerslice apply` or `retire` to change or remove a unit, account or
+- `runner-slice apply` or `retire` to change or remove a unit, account or
   directory that RunnerSlice did not create;
-- `runnerslice check` to report a boundary as intact when it is not;
+- `runner-slice check` to report a boundary as intact when it is not;
 - RunnerSlice to write, print or log a registration token or `.credentials`.
 
 ## Out of scope

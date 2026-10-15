@@ -27,7 +27,7 @@ reported as SKIPPED or BLOCKED, never as passed.
 
 | Layer | Where | What it runs |
 |---|---|---|
-| Static | `tests/run.sh`, which CI runs | `shellcheck` on every script, including `bin/runnerslice`. |
+| Static | `tests/run.sh`, which CI runs | `shellcheck` on every script, including `bin/runner-slice`. |
 | Synthetic | `tests/*-drill.sh`, which CI runs | The real scripts, unmodified, against a fixture host. |
 | Integration | a disposable VM, by hand | Real systemd, cgroups, accounts, registration and GitHub jobs: the lifecycle acceptance below. |
 | Dogfood | a separate private repository, on that VM | RunnerSlice's own drills, run by runners RunnerSlice manages. |
@@ -51,7 +51,7 @@ process and mount tables.
 | `apply-drill.sh` | The lifecycle on a fixture host. It covers: fresh install; the registration boundary; idempotence; slice changes versus unit changes; busy and unknown runners; tampered downloads; interrupted unpacks; foreign units; misregistration; the fleet; orphans; retirement. |
 | `check-drill.sh` | A converged fixture host, then one break at a time. Each break must fail and name itself. |
 | `status-drill.sh` | GitHub answers that must be trusted, and those that must not. |
-| `cli-drill.sh` | Each `runnerslice` command reaches exactly one script. |
+| `cli-drill.sh` | Each `runner-slice` command reaches exactly one script. |
 | `release-drill.sh` | Archive reproducibility and contents. The unpacked archive's own `tests/run.sh` must pass. |
 
 A change to code that runs as root comes with a drill case that fails without
@@ -143,7 +143,7 @@ Creating either environment needs owner approval, and so does any cost.
 ### Dogfood
 
 The integration VM's runners are registered to a separate private repository,
-proposed as `swarea/runnerslice-dogfood`. They are not registered to this
+proposed as `swarea/runner-slice-dogfood`. They are not registered to this
 repository.
 
 - **Its workflow** checks out an owner-approved commit of RunnerSlice by SHA,
