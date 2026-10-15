@@ -45,6 +45,8 @@ apply --profile app
 expect_rc 'a fresh apply is not converged while registration is left to a person' 1
 expect_out 'the registration command is printed' 'actions/runners/registration-token'
 expect_out 'registration names the runner and its labels' '--name lab-app-01 --labels lab,app'
+expect_out 'the token travels in the environment' 'sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app'
+expect_no 'the token is never on a command line' '--token'
 expect_no 'no token is requested by the tool itself' 'TOKEN=ghs'
 holds 'the verified release is unpacked' [ -x "$H/root/var/lib/ci-app/runner/config.sh" ]
 expect_lines 'the archive was downloaded once' "$H/fake/curl.log" 1
@@ -125,6 +127,32 @@ expect_rc 'a digest mismatch fails' 1
 expect_out 'and says so' 'digest mismatch; refusing to unpack'
 refutes 'nothing was unpacked' [ -e "$H/root/var/lib/ci-app/runner/config.sh" ]
 
+# A registered runner whose release went missing is not unpacked into: its
+# directory is the jobs', and root would be extracting where they can reach.
+new_host lostrelease
+only app
+apply --profile app
+register app
+apply --profile app
+rm -f "$H/root/var/lib/ci-app/runner/config.sh"
+curl_before=$(grep -c . "$H/fake/curl.log")
+apply --profile app
+expect_rc 'a registered runner with a missing release is not converged' 1
+expect_out 'it is reported, not re-unpacked' 'is registered but its release is incomplete'
+expect_lines 'nothing was downloaded' "$H/fake/curl.log" "$curl_before"
+refutes 'the runner binary was never executed by apply' [ -e "$H/fake/listener-executed" ]
+
+# A runtime root RunnerSlice did not create is someone else's directory.
+new_host foreignroot
+only app
+mkdir -p "$H/root/var/lib/ci-app"
+: > "$H/root/var/lib/ci-app/their-data"
+before=$(snapshot)
+apply --profile app
+expect_rc 'an existing runtime root without the marker stops the profile' 1
+expect_out 'it is named' '/var/lib/ci-app exists and was not created by RunnerSlice'
+expect_same 'nothing was created, chowned or downloaded' "$before"
+
 # ---------------------------------------------------------------------------
 echo
 echo '== one runner: an interrupted unpack is completed, not trusted =='
@@ -179,7 +207,7 @@ sed -i 's#"gitHubUrl": "[^"]*"#"gitHubUrl": "https://github.com/example-org/else
     "$H/root/var/lib/ci-app/runner/.runner"
 apply --profile app
 expect_rc 'a registration for another repository fails' 1
-expect_out 'it says what differs' 'repository is https://github.com/example-org/elsewhere'
+expect_out 'it says what differs' "repository is 'https://github.com/example-org/elsewhere'"
 expect_lines 'the runner is not started' "$H/fake/enabled" 0
 printf 'not json' > "$H/root/var/lib/ci-app/runner/.runner"
 apply --profile app
@@ -329,12 +357,22 @@ for id in docs web; do
     expect_rc "$id stops at deregistration" 10
     rm -f "$H/root/var/lib/ci-$id/runner/.runner" "$H/root/var/lib/ci-$id/runner/.credentials"
     if [ "$id" = docs ]; then
+        # A job's leftover process blocks the removal; nothing is removed.
+        echo 4242 > "$H/fake/procs-runner-docs"
+        apply --retire docs
+        expect_rc 'a leftover process of the runner blocks its removal' 1
+        expect_out 'and is named' 'processes of runner-docs are still running (4242)'
+        holds 'its runtime root is still there' [ -d "$H/root/var/lib/ci-docs" ]
+        holds 'and so is its unit' [ -e "$H/$UNITS/ci-docs-runner.service" ]
+        rm -f "$H/fake/procs-runner-docs"
         # A unit someone else put in place of RunnerSlice's is not removed.
         cp "$H/$UNITS/ci-docs-runner.service" "$T/docs.saved"
         printf '[Unit]\nDescription=replaced by hand\n' > "$H/$UNITS/ci-docs-runner.service"
         apply --retire docs
         expect_rc 'retirement refuses a unit RunnerSlice did not write' 1
         holds 'and leaves that unit in place' grep -q 'replaced by hand' "$H/$UNITS/ci-docs-runner.service"
+        holds 'and removes nothing else either' [ -d "$H/root/var/lib/ci-docs" ]
+        holds 'not even the account' [ -e "$H/fake/user-runner-docs" ]
         cp "$T/docs.saved" "$H/$UNITS/ci-docs-runner.service"
     fi
     apply --retire "$id"

@@ -223,17 +223,25 @@ chmod 0000 "$H/root/srv/example-app/.env"
 echo
 echo '== runner release =='
 # ---------------------------------------------------------------------------
-LISTENER="$H/root/var/lib/ci-app/runner/bin/Runner.Listener"
-printf '#!/bin/sh\necho 2.340.0\n' > "$LISTENER"
+DEPS="$H/root/var/lib/ci-app/runner/bin/Runner.Listener.deps.json"
+cp "$DEPS" "$T/deps.saved"
+version() { printf '{"libraries": {"Runner.Listener/%s": {}}}\n' "$1" > "$DEPS"; }
+version 2.340.0
 check --profile app
 expect_pass 'a runner that updated itself passes'
-printf '#!/bin/sh\necho 2.300.0\n' > "$LISTENER"
+version 2.300.0
 check --profile app
 expect_fail 'a runner below the seed fails' 'below the seed 2.338.0'
-printf '#!/bin/sh\nexit 1\n' > "$LISTENER"
+printf 'not json' > "$DEPS"
 check --profile app
 expect_fail 'an unreadable version fails closed' 'cannot determine the installed runner version'
-printf '#!/bin/sh\necho 2.338.0\n' > "$LISTENER"
+# A link to a perfectly good manifest elsewhere is still not followed.
+printf '{"libraries": {"Runner.Listener/2.338.0": {}}}\n' > "$T/elsewhere.json"
+rm -f "$DEPS"; ln -s "$T/elsewhere.json" "$DEPS"
+check --profile app
+expect_fail 'a manifest that is a symlink is not followed' 'cannot determine the installed runner version'
+rm -f "$DEPS"; cp "$T/deps.saved" "$DEPS"
+refutes 'the runner binary was never executed by check' [ -e "$H/fake/listener-executed" ]
 
 # ---------------------------------------------------------------------------
 echo

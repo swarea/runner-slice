@@ -16,7 +16,7 @@
 # refuses to run as root.
 set -euo pipefail
 
-FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=fabric-lib.sh
 . "$FABRIC_DIR/fabric-lib.sh"
 # shellcheck source=host-lib.sh
@@ -63,7 +63,7 @@ done
 [ -n "$CONFIG" ] || usage
 [ -n "$MODE" ] || usage
 [ -d "$CONFIG" ] || { echo "no such configuration directory: $CONFIG" >&2; exit 2; }
-CONFIG=$(cd "$CONFIG" && pwd)
+CONFIG=$(cd "$CONFIG" && pwd -P)
 
 host_preflight "$CONFIG" --user gh python3 mktemp
 
@@ -103,7 +103,7 @@ status_profile() {
     # Exactly one runner of this name, with a status and busy flag GitHub
     # actually stated. A second page would hide a duplicate, so more runners
     # than one page holds is refused rather than half-read.
-    if ! remote=$(python3 - "$json" "$name" <<'PY'
+    if ! remote=$(python3 -I - "$json" "$name" <<'PY'
 import json
 import sys
 

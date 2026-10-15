@@ -24,7 +24,12 @@
 # fleet children) or for deregistration (for --retire).
 set -euo pipefail
 
-FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Temporary files of a root run go where root decides, not where an inherited
+# TMPDIR points: a directory another account can write would let it swap a
+# rendered unit before it is installed.
+unset TMPDIR
+
+FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=fabric-lib.sh
 . "$FABRIC_DIR/fabric-lib.sh"
 # shellcheck source=host-lib.sh
@@ -81,7 +86,7 @@ done
 [ -n "$CONFIG" ] || usage
 [ -n "$MODE" ] || usage
 [ -d "$CONFIG" ] || { echo "no such configuration directory: $CONFIG" >&2; exit 2; }
-CONFIG=$(cd "$CONFIG" && pwd)
+CONFIG=$(cd "$CONFIG" && pwd -P)
 
 POLICY="$CONFIG/fabric.conf"
 
@@ -111,6 +116,15 @@ fabric_orphan_units() {
         fabric_unit_is_ours "$unit" || continue
         grep -Fxq -- "$(basename "$unit")" <<<"$known" || basename "$unit"
     done
+}
+
+# The runtime root carries a root-owned marker naming its profile, written
+# when RunnerSlice creates the root. A directory of that name without it
+# belongs to something else -- /var/lib/docker, say, under name-prefix docker
+# -- and is neither adopted nor removed.
+install_root_is_ours() {
+    [ -f "$FS_INSTALL_ROOT/.runner-slice-root" ] && [ ! -L "$FS_INSTALL_ROOT/.runner-slice-root" ] &&
+        [ "$(cat "$FS_INSTALL_ROOT/.runner-slice-root")" = "$PROFILE_ID" ]
 }
 
 # refuse_if_busy SERVICE WHAT   exits when a job is, or may be, in flight
@@ -289,9 +303,10 @@ if [ "$MODE" = retire ]; then
     if [ -f "$FS_RUNNER_DIR/.runner" ] || [ -f "$FS_RUNNER_DIR/.credentials" ]; then
         todo "deregister $RUNNER_NAME from $RUNNER_REPO, as a person; the files here are its credentials:"
         note ""
-        note "  TOKEN=\$(gh api -X POST /repos/$RUNNER_REPO/actions/runners/remove-token --jq .token)"
-        note "  sudo -u $RUNNER_USER -H env HOME=$RUNNER_HOME $RUNNER_DIR/config.sh remove --token \"\$TOKEN\""
-        note "  unset TOKEN"
+        note "  export ACTIONS_RUNNER_INPUT_TOKEN=\"\$(gh api -X POST /repos/$RUNNER_REPO/actions/runners/remove-token --jq .token)\""
+        note "  sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u $RUNNER_USER -H \\"
+        note "      env HOME=$RUNNER_HOME $RUNNER_DIR/config.sh remove --unattended"
+        note "  unset ACTIONS_RUNNER_INPUT_TOKEN"
         note ""
         note "  if GitHub cannot be reached from here, delete the runner on GitHub instead and then"
         note "  sudo rm -f $RUNNER_DIR/.runner $RUNNER_DIR/.credentials $RUNNER_DIR/.credentials_rsaparams"
@@ -310,23 +325,48 @@ if [ "$MODE" = retire ]; then
     if [ -f "$FS_RUNNER_DIR/.runner" ] || [ -f "$FS_RUNNER_DIR/.credentials" ]; then
         note "left in place until deregistration is done"
     else
+        # Everything is checked before anything is removed: a retirement that
+        # stops half-way must not have taken some things and left others.
+        removable=1
         if [ -e "$UNIT_DIR/$SERVICE" ] && ! fabric_unit_is_ours "$UNIT_DIR/$SERVICE"; then
             fail "refusing to remove $UNIT_DIR/$SERVICE: it was not written by RunnerSlice"
-        elif host_remove_file "$UNIT_DIR/$SERVICE" "retired runner" &&
-             [ "$CHECK_ONLY" -eq 0 ]; then
-            systemctl daemon-reload
+            removable=0
         fi
         # Validation already proved the root is /var/lib/<prefix>[-<id>] and
-        # unique in the fleet; this is the last guard before rm -rf.
-        own_root_ok=1
-        case "$INSTALL_ROOT" in /var/lib/"$NAME_PREFIX"|/var/lib/"$NAME_PREFIX"-?*) ;; *) own_root_ok=0 ;; esac
+        # unique in the fleet; the marker proves RunnerSlice created it.
+        root_ok=1
+        case "$INSTALL_ROOT" in /var/lib/"$NAME_PREFIX"|/var/lib/"$NAME_PREFIX"-?*) ;; *) root_ok=0 ;; esac
         while IFS= read -r peer; do
             [ "$peer" = "$PROFILE" ] && continue
-            [ "$(fabric_value "$peer" install-root)" = "$INSTALL_ROOT" ] && own_root_ok=0
+            [ "$(fabric_value "$peer" install-root)" = "$INSTALL_ROOT" ] && root_ok=0
         done < <(fabric_profiles "$CONFIG")
-        if [ "$own_root_ok" -ne 1 ]; then
-            fail "refusing to remove $INSTALL_ROOT: it is not this runner's own runtime root"
-        elif [ -e "$FS_INSTALL_ROOT" ]; then
+        if [ -e "$FS_INSTALL_ROOT" ] && ! install_root_is_ours; then
+            root_ok=0
+        fi
+        if [ "$root_ok" -ne 1 ]; then
+            fail "refusing to remove $INSTALL_ROOT: it is not a runtime root RunnerSlice created for this runner"
+            removable=0
+        fi
+        if getent passwd "$RUNNER_USER" >/dev/null && ! host_account_is_ours "$RUNNER_USER"; then
+            fail "account $RUNNER_USER is not a RunnerSlice system account; not removing it"
+            removable=0
+        fi
+        # A job's leftover process (KillMode=process lets one outlive the
+        # service) would keep files open and make the account removal fail.
+        if leftover=$(pgrep -u "$RUNNER_USER" 2>/dev/null | paste -sd' ' -) && [ -n "$leftover" ]; then
+            fail "processes of $RUNNER_USER are still running ($leftover)"
+            note "  stop them, then run --retire $PROFILE_ID again"
+            removable=0
+        fi
+        if [ "$removable" -ne 1 ]; then
+            note "nothing was removed"
+            host_report_apply
+        fi
+
+        if host_remove_file "$UNIT_DIR/$SERVICE" "retired runner" && [ "$CHECK_ONLY" -eq 0 ]; then
+            systemctl daemon-reload
+        fi
+        if [ -e "$FS_INSTALL_ROOT" ]; then
             change "remove $INSTALL_ROOT"
             [ "$CHECK_ONLY" -eq 0 ] && rm -rf --one-file-system -- "$FS_INSTALL_ROOT"
         else
@@ -362,6 +402,12 @@ for unit in "$SLICE" "$SERVICE"; do
         ok "$unit is RunnerSlice's or absent"
     fi
 done
+# Likewise a runtime root RunnerSlice did not create.
+if [ -e "$FS_INSTALL_ROOT" ] && ! install_root_is_ours; then
+    fail "$INSTALL_ROOT exists and was not created by RunnerSlice for $PROFILE_ID; refusing to adopt it"
+else
+    ok "$INSTALL_ROOT is RunnerSlice's or absent"
+fi
 [ "$check_failed" -eq 0 ] || host_report_apply
 
 # ---------------------------------------------------------------------------
@@ -374,7 +420,10 @@ step "directories"
 # ---------------------------------------------------------------------------
 # root owns the runtime root so the runner account cannot replace the tree
 # its service starts from; the account owns only what the runner writes.
-host_ensure_dir "$FS_INSTALL_ROOT" root           "$RUNNER_USER" 0750 || true
+if host_ensure_dir "$FS_INSTALL_ROOT" root "$RUNNER_USER" 0750 &&
+   [ "$CHECK_ONLY" -eq 0 ] && [ ! -e "$FS_INSTALL_ROOT/.runner-slice-root" ]; then
+    printf '%s\n' "$PROFILE_ID" > "$FS_INSTALL_ROOT/.runner-slice-root"
+fi
 host_ensure_dir "$FS_RUNNER_DIR"   "$RUNNER_USER" "$RUNNER_USER" 0750 || true
 host_ensure_dir "$FS_WORK_DIR"     "$RUNNER_USER" "$RUNNER_USER" 0750 || true
 
@@ -407,28 +456,25 @@ step "runner release $RUNNER_VERSION"
 # releases that are too old, so freezing the version would trade a benign
 # drift report for an outage.
 # The seed marker is written, root-owned, only after a complete unpack. An
-# unpack interrupted part-way leaves config.sh without it, and is redone
-# rather than mistaken for a runner. A registered runner is never re-seeded.
+# unpack interrupted part-way leaves no marker and is redone rather than
+# mistaken for a runner.
+#
+# A registered runner is never unpacked into again. Its directory holds what
+# its jobs wrote; root extracting and chowning there would act inside a tree
+# a job controls, through any link a job left. A first unpack goes into a
+# directory root has just created, empty and closed to the runner account.
 SEED_MARKER="$FS_INSTALL_ROOT/.runner-slice-seeded"
-if [ -x "$FS_RUNNER_DIR/config.sh" ] &&
-   [ ! -f "$SEED_MARKER" ] && [ ! -f "$FS_RUNNER_DIR/.runner" ]; then
-    change "complete an interrupted unpack of $RUNNER_ARCHIVE into $RUNNER_DIR"
-    needs_unpack=1
-elif [ -x "$FS_RUNNER_DIR/config.sh" ]; then
-    needs_unpack=0
-else
-    change "download and unpack $RUNNER_ARCHIVE into $RUNNER_DIR"
-    needs_unpack=1
-fi
+registered=0
+{ [ -f "$FS_RUNNER_DIR/.runner" ] || [ -f "$FS_RUNNER_DIR/.credentials" ]; } && registered=1
 
-if [ "$needs_unpack" -eq 0 ]; then
+if [ "$registered" -eq 1 ] && [ ! -f "$FS_RUNNER_DIR/config.sh" ]; then
+    todo "$PROFILE_ID is registered but its release is incomplete; it is not unpacked over"
+    note "  re-seed it by hand with no job in flight, or retire it and apply again"
+elif [ "$registered" -eq 1 ] || [ -f "$SEED_MARKER" ]; then
     installed=""
-    if [ -x "$FS_RUNNER_DIR/bin/Runner.Listener" ]; then
-        installed=$(runuser -u "$RUNNER_USER" -- "$FS_RUNNER_DIR/bin/Runner.Listener" --version 2>/dev/null \
-                    | tr -d '\r' | head -1) || true
-    fi
+    installed=$(host_runner_version "$FS_RUNNER_DIR") || installed=""
     if [ -z "$installed" ]; then
-        ok "runner release already unpacked in $RUNNER_DIR"
+        ok "runner release unpacked in $RUNNER_DIR (its version could not be read)"
     elif [ "$(printf '%s\n%s\n' "$RUNNER_VERSION" "$installed" | sort -V | head -1)" = "$RUNNER_VERSION" ]; then
         ok "runner $installed installed, at or above the seed $RUNNER_VERSION"
     else
@@ -443,16 +489,23 @@ if [ "$needs_unpack" -eq 0 ]; then
         note "  .runner and .credentials survive an unpack, so this does not re-register"
     fi
 else
+    if [ -e "$FS_RUNNER_DIR/config.sh" ]; then
+        change "complete an interrupted unpack of $RUNNER_ARCHIVE into $RUNNER_DIR"
+    else
+        change "download and unpack $RUNNER_ARCHIVE into $RUNNER_DIR"
+    fi
     if [ "$CHECK_ONLY" -eq 0 ]; then
         mkdir -m 0700 "$WORK/release"
         curl -fsSL --retry 5 --retry-delay 5 -o "$WORK/release/$RUNNER_ARCHIVE" "$RUNNER_URL"
         echo "$RUNNER_SHA  $WORK/release/$RUNNER_ARCHIVE" | sha256sum -c - >/dev/null \
             || { echo "runner archive digest mismatch; refusing to unpack" >&2; exit 1; }
         note "archive digest verified"
-        tar -xzf "$WORK/release/$RUNNER_ARCHIVE" -C "$FS_RUNNER_DIR"
+        # Unregistered, so nothing here is the runner's yet: start from an
+        # empty directory only root can enter, then hand it over.
+        rm -rf --one-file-system -- "$FS_RUNNER_DIR"
+        mkdir -m 0700 "$FS_RUNNER_DIR"
+        tar -xzf "$WORK/release/$RUNNER_ARCHIVE" -C "$FS_RUNNER_DIR" --no-same-owner
         chown -R "$RUNNER_USER:$RUNNER_USER" "$FS_RUNNER_DIR"
-        # The archive's top-level "." entry can replace the directory mode
-        # set above, so it is reasserted after extraction.
         chmod 0750 "$FS_RUNNER_DIR"
         printf '%s %s\n' "$RUNNER_VERSION" "$RUNNER_SHA" > "$SEED_MARKER"
         rm -rf "$WORK/release"
@@ -485,13 +538,17 @@ else
     registration_required=1
     todo "register the runner, as a person, with a token that expires in an hour:"
     note ""
-    note "  TOKEN=\$(gh api -X POST /repos/$RUNNER_REPO/actions/runners/registration-token --jq .token)"
-    note "  sudo -u $RUNNER_USER -H env HOME=$RUNNER_HOME $RUNNER_DIR/config.sh \\"
-    note "      --url https://github.com/$RUNNER_REPO --token \"\$TOKEN\" \\"
+    note "  export ACTIONS_RUNNER_INPUT_TOKEN=\"\$(gh api -X POST /repos/$RUNNER_REPO/actions/runners/registration-token --jq .token)\""
+    note "  sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u $RUNNER_USER -H \\"
+    note "      env HOME=$RUNNER_HOME $RUNNER_DIR/config.sh \\"
+    note "      --url https://github.com/$RUNNER_REPO \\"
     note "      --name $RUNNER_NAME --labels $LABELS \\"
     note "      --work $WORK_DIR --unattended --replace"
+    note "  unset ACTIONS_RUNNER_INPUT_TOKEN"
     note "  sudo chmod 600 $RUNNER_DIR/.runner $RUNNER_DIR/.credentials $RUNNER_DIR/.credentials_rsaparams"
-    note "  unset TOKEN"
+    note ""
+    note "  the token travels in the environment, which only root and the runner account"
+    note "  can read, never on a command line that sudo logs and ps shows"
     note ""
     note "then run this again to install and start the service"
 fi
