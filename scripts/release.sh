@@ -5,7 +5,7 @@
 #     scripts/release.sh --out DIR [--snapshot]
 #
 # The archive is `git archive` of HEAD: exactly the committed files, under
-# runnerslice-<version>/, with the commit's own timestamp, compressed without
+# runner-slice-<version>/, with the commit's own timestamp, compressed without
 # a name or time. The same commit always gives the same bytes, so anyone can
 # rebuild it and compare the checksum.
 #
@@ -45,7 +45,7 @@ if [[ "$version" == *-dev* ]] && [ "$SNAPSHOT" -eq 0 ]; then
     exit 1
 fi
 
-name="runnerslice-$version"
+name="runner-slice-$version"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 git archive --format=tar --prefix="$name/" HEAD | gzip -n -9 > "$OUT/$name.tar.gz"
