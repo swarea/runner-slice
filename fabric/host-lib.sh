@@ -28,6 +28,8 @@ CGROUP_ROOT=/sys/fs/cgroup
 PROC_ROOT=/proc
 # shellcheck disable=SC2034 # read by the scripts that source this file
 UNIT_DIR="$HOST_ROOT/etc/systemd/system"
+# The only account trusted to own what root runs or reads.
+TRUSTED_OWNER=root
 
 # The oldest systemd whose behaviour the units rely on: ProtectHome=tmpfs with
 # BindPaths, and a slice's IPAddressDeny merged into every unit inside it.
@@ -68,13 +70,14 @@ host_release_arch() {
 # host_unsafe_paths DIR...
 #
 # Prints every file under each DIR, and every directory above it, that an
-# account other than root could change. Root must not run, or act on, what an
+# account other than root could change, and every symlink: a link points at
+# a file whose owner was never checked. Root must not run, or act on, what an
 # unprivileged account could have rewritten -- and a directory above is enough
 # to swap the whole tree. Prints nothing when all is safe.
 host_unsafe_paths() {
     local dir p
     for dir in "$@"; do
-        find "$dir" \( ! -user root -o -perm -0020 -o -perm -0002 \) \
+        find "$dir" \( -type l -o ! -user "$TRUSTED_OWNER" -o -perm -0020 -o -perm -0002 \) \
             -printf '%p ' 2>/dev/null || printf '%s(unreadable) ' "$dir"
         p=$(readlink -f -- "$dir")
         while [ "$p" != / ] && [ -n "$p" ]; do
@@ -157,10 +160,60 @@ host_preflight() {
 
     if [ -f "$CGROUP_ROOT/cgroup.controllers" ]; then
         ok "cgroup v2 unified hierarchy"
+        # The slice's limits need these controllers. Without one, systemd
+        # accepts the setting and enforces nothing.
+        local controller missing_ctl=""
+        for controller in cpu memory pids; do
+            grep -qw -- "$controller" "$CGROUP_ROOT/cgroup.controllers" ||
+                missing_ctl="$missing_ctl $controller"
+        done
+        if [ -n "$missing_ctl" ]; then
+            warn "cgroup controllers not available:$missing_ctl"
+            failed=1
+        else
+            ok "cpu, memory and pids controllers available"
+        fi
     else
         warn "no cgroup v2 unified hierarchy at $CGROUP_ROOT"
         failed=1
     fi
+
+    # A ceiling above what the host has limits nothing; it is a declaration
+    # written for another machine.
+    local mem_kib mem_max cpus quota
+    mem_kib=$(awk '$1 == "MemTotal:" { print $2 }' "$PROC_ROOT/meminfo" 2>/dev/null)
+    mem_max=$(fabric_value "$config/fabric.conf" slice-memory-max)
+    if [[ "$mem_kib" =~ ^[0-9]+$ ]] && [[ "$mem_max" =~ ^[1-9][0-9]*[KMGT]?$ ]]; then
+        if [ "$(fabric_size_bytes "$mem_max")" -le $((mem_kib * 1024)) ]; then
+            ok "slice-memory-max $mem_max fits in $((mem_kib / 1024)) MiB of memory"
+        else
+            warn "slice-memory-max $mem_max is more than this host's $((mem_kib / 1024)) MiB"
+            failed=1
+        fi
+    else
+        warn "cannot compare slice-memory-max with this host's memory"
+        failed=1
+    fi
+    cpus=$(nproc 2>/dev/null)
+    quota=$(fabric_value "$config/fabric.conf" slice-cpu-quota)
+    quota=${quota%\%}
+    if [[ "$cpus" =~ ^[0-9]+$ ]] && [[ "$quota" =~ ^[0-9]+$ ]]; then
+        if [ "$quota" -le $((cpus * 100)) ]; then
+            ok "slice-cpu-quota ${quota}% fits in $cpus CPUs"
+        else
+            warn "slice-cpu-quota ${quota}% is more than this host's $cpus CPUs ($((cpus * 100))%)"
+            failed=1
+        fi
+    else
+        warn "cannot compare slice-cpu-quota with this host's CPUs"
+        failed=1
+    fi
+
+    # Runners installed by GitHub's own svc.sh run outside the slice. They
+    # are not RunnerSlice's to change, but the operator should know.
+    local foreign
+    foreign=$(find "$UNIT_DIR" -maxdepth 1 -name 'actions.runner.*.service' -printf '%f ' 2>/dev/null)
+    [ -z "$foreign" ] || note "runners outside RunnerSlice, not limited by its slice: $foreign"
 
     expected_host=$(fabric_value "$config/fabric.conf" host-name)
     host=$(uname -n)
@@ -185,7 +238,7 @@ host_preflight() {
     fi
 
     local required missing=""
-    for required in awk basename cmp dirname find grep id install sed sort stat systemctl "$@"; do
+    for required in awk basename cmp dirname find grep id install nproc sed sort stat systemctl "$@"; do
         command -v "$required" >/dev/null 2>&1 || missing="$missing $required"
     done
     if [ -n "$missing" ]; then
@@ -240,6 +293,28 @@ host_remove_file() {
 # Accounts and directories
 # ---------------------------------------------------------------------------
 
+# host_uid_min   the first uid of an ordinary login account on this host
+host_uid_min() {
+    local min
+    min=$(awk '$1 == "UID_MIN" { print $2 }' "$HOST_ROOT/etc/login.defs" 2>/dev/null)
+    [[ "$min" =~ ^[0-9]+$ ]] || min=1000
+    echo "$min"
+}
+
+# host_account_is_ours NAME
+#
+# Whether an existing account has the shape RunnerSlice creates: a system
+# account whose home is /home/NAME. An ordinary login account of the same name
+# belongs to a person, and is never adopted, chowned to or removed.
+host_account_is_ours() {
+    local name=$1 entry uid home
+    entry=$(getent passwd "$name") || return 1
+    uid=$(cut -d: -f3 <<<"$entry")
+    home=$(cut -d: -f6 <<<"$entry")
+    [[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" -lt "$(host_uid_min)" ] && [ "$uid" -ne 0 ] &&
+        [ "$home" = "/home/$name" ]
+}
+
 # host_ensure_user NAME
 #
 # A system account with its own primary group, a real home, and no
@@ -248,9 +323,15 @@ host_remove_file() {
 # So membership is asserted to be empty rather than merely "not sudo".
 #
 # uid and gid are deliberately not pinned. They are allocation, not
-# configuration; every path here is owned by name.
+# configuration; every path here is owned by name. Returns 1, having changed
+# nothing, when an account of that name exists and is not one RunnerSlice
+# would have created.
 host_ensure_user() {
     local name=$1 groups
+    if getent passwd "$name" >/dev/null && ! host_account_is_ours "$name"; then
+        fail "account $name exists and is not a RunnerSlice system account; refusing to adopt it"
+        return 1
+    fi
     if ! getent group "$name" >/dev/null; then
         change "create group $name"
         [ "$CHECK_ONLY" -eq 0 ] && groupadd --system "$name"
@@ -277,12 +358,17 @@ host_ensure_user() {
             ok "$name holds no supplementary group"
         fi
     fi
+    return 0
 }
 
 # host_remove_user NAME   the account, its home and its private group only
 host_remove_user() {
     local name=$1
     if getent passwd "$name" >/dev/null; then
+        if ! host_account_is_ours "$name"; then
+            fail "account $name is not a RunnerSlice system account; not removing it"
+            return 0
+        fi
         change "remove user $name and its home"
         [ "$CHECK_ONLY" -eq 0 ] && userdel --remove "$name" 2>/dev/null
     else
@@ -378,6 +464,46 @@ host_job_state() {
     done < "$procs"
 
     return 1
+}
+
+# host_registration_state RUNNER_DIR REPO NAME WORK_DIR
+#
+# Whether the runner in RUNNER_DIR is registered as the profile says: to that
+# repository, under that name, with that work folder. Reads only .runner,
+# which the runner writes at registration and which holds no credential;
+# .credentials is never opened. Prints "ok" and returns 0, prints what differs
+# and returns 1, or prints why it could not tell and returns 2.
+host_registration_state() {
+    local file="$1/.runner"
+    [ -r "$file" ] || { echo "$file is unreadable"; return 2; }
+    python3 -I - "$file" "$2" "$3" "$4" <<'PY'
+import json
+import sys
+
+path, repo, name, work = sys.argv[1:5]
+try:
+    with open(path, encoding="utf-8-sig") as f:
+        data = json.load(f)
+except (OSError, ValueError) as e:
+    print(f"{path} cannot be parsed: {e.__class__.__name__}")
+    sys.exit(2)
+if not isinstance(data, dict):
+    print(f"{path} is not a JSON object")
+    sys.exit(2)
+
+problems = []
+url = str(data.get("gitHubUrl", "")).rstrip("/")
+if url.lower() != f"https://github.com/{repo}".lower():
+    problems.append(f"repository is {url or 'missing'}")
+if data.get("agentName") != name:
+    problems.append(f"name is {data.get('agentName')!r}")
+if data.get("workFolder") != work:
+    problems.append(f"work folder is {data.get('workFolder')!r}")
+if problems:
+    print("; ".join(problems))
+    sys.exit(1)
+print("ok")
+PY
 }
 
 # ---------------------------------------------------------------------------
