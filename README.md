@@ -72,20 +72,20 @@ The full security model is in [docs/threat-model.md](docs/threat-model.md).
 ## How it works
 
 ```text
-/etc/runnerslice/fabric.conf           slice limits, prefixes, masks for the whole host
-/etc/runnerslice/runner-release.conf   the actions/runner release to install, by SHA-256
-/etc/runnerslice/profiles/app.conf     one runner: repository, name, account, labels
+/etc/runner-slice/fabric.conf           slice limits, prefixes, masks for the whole host
+/etc/runner-slice/runner-release.conf   the actions/runner release to install, by SHA-256
+/etc/runner-slice/profiles/app.conf     one runner: repository, name, account, labels
 ```
 
 ```sh
-runnerslice validate          # offline: identities unique, pools consistent, no secrets
-sudo runnerslice plan         # what apply would change; changes nothing
-sudo runnerslice apply app    # account, directories, release, units; stops at registration
+runner-slice validate          # offline: identities unique, pools consistent, no secrets
+sudo runner-slice plan         # what apply would change; changes nothing
+sudo runner-slice apply app    # account, directories, release, units; stops at registration
 #   ... a person registers the runner with a one-hour token (the command is printed) ...
-sudo runnerslice apply app    # confirms the registration, enables and starts the service
-sudo runnerslice check        # proves the boundary and limits on the running host
-runnerslice status            # GitHub's view: online, busy, local service state
-sudo runnerslice retire app   # drain, stop, deregister, remove; one safe step per run
+sudo runner-slice apply app    # confirms the registration, enables and starts the service
+sudo runner-slice check        # proves the boundary and limits on the running host
+runner-slice status            # GitHub's view: online, busy, local service state
+sudo runner-slice retire app   # drain, stop, deregister, remove; one safe step per run
 ```
 
 Several runners for one repository form a **pool**. Add a profile, apply the

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# runnerslice: one command for the scripts in fabric/. It translates a
+# runner-slice: one command for the scripts in fabric/. It translates a
 # subcommand into exactly one of them and adds nothing else, so every rule
 # lives in one place.
 #
-#     runnerslice [--config DIR] COMMAND [ARGS]
+#     runner-slice [--config DIR] COMMAND [ARGS]
 #
-# DIR defaults to /etc/runnerslice. It is never taken from the environment:
+# DIR defaults to /etc/runner-slice. It is never taken from the environment:
 # root acts on it.
 set -euo pipefail
 
@@ -16,7 +16,7 @@ FABRIC="$HOME_DIR/fabric"
 
 usage() {
     cat >&2 <<'USAGE'
-usage: runnerslice [--config DIR] COMMAND [ARGS]
+usage: runner-slice [--config DIR] COMMAND [ARGS]
 
 Inventory, offline and unprivileged:
   validate              check the policy, release seed and every profile
@@ -34,12 +34,12 @@ From GitHub, as an ordinary user with an authenticated gh:
 
   version               print the version
 
-DIR defaults to /etc/runnerslice.
+DIR defaults to /etc/runner-slice.
 USAGE
     exit 2
 }
 
-CONFIG=/etc/runnerslice
+CONFIG=/etc/runner-slice
 if [ "${1-}" = --config ]; then
     [ -n "${2-}" ] || usage
     CONFIG=$2
@@ -95,13 +95,13 @@ case "$command" in
         ;;
     version|--version)
         [ "$#" -eq 0 ] || usage
-        printf 'runnerslice %s\n' "$(cat "$HOME_DIR/VERSION")"
+        printf 'runner-slice %s\n' "$(cat "$HOME_DIR/VERSION")"
         ;;
     -h|--help|help)
         usage
         ;;
     *)
-        echo "runnerslice: unknown command '$command'" >&2
+        echo "runner-slice: unknown command '$command'" >&2
         usage
         ;;
 esac
