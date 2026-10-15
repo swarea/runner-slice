@@ -77,7 +77,7 @@ written from scratch unless the source could not be generalised.
 | Optional deny list for the slice | `slice-ip-deny` in the policy | SYNTHETICALLY TESTED; provider-specific |
 | Refusing what RunnerSlice did not create: foreign units, human accounts, symlinked or non-root inventories | `fabric/fabric-apply.sh`, `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
 | Registration identity: the runner is registered as its profile says | `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
-| One command: `runnerslice` | `bin/runnerslice` | SYNTHETICALLY TESTED |
+| One command: `runner-slice` | `bin/runner-slice` | SYNTHETICALLY TESTED |
 | Reproducible release archive with checksum | `scripts/release.sh` | SYNTHETICALLY TESTED |
 
 `tests/run.sh` is the one verification entry point: shellcheck, then every
@@ -188,13 +188,13 @@ The version follows the evidence. No stage is skipped to reach a number.
 ## Open decisions (owner)
 
 Decided on 2026-10-15: the name (decision 0003), the MIT licence, and a
-private `swarea/runnerslice` repository with rebase-only merges. Still open,
+private `swarea/runner-slice` repository with rebase-only merges. Still open,
 each a separate approval:
 
 - **Public visibility**, and the first release.
 - **The verification VMs:** an ARM64 VM on the maintainer's laptop, and a
   short-lived x86_64 cloud VM with a cost cap.
-- **The private dogfood repository** (proposed: `swarea/runnerslice-dogfood`),
+- **The private dogfood repository** (proposed: `swarea/runner-slice-dogfood`),
   and the registration-token steps.
 - **Hosted CI minutes** for the private repository, which are currently
   blocked by billing.

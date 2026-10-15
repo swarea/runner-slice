@@ -1,9 +1,9 @@
 # Configuration reference
 
-An inventory is a directory, by default `/etc/runnerslice`:
+An inventory is a directory, by default `/etc/runner-slice`:
 
 ```text
-/etc/runnerslice/
+/etc/runner-slice/
   fabric.conf            host-wide policy
   runner-release.conf    the runner release a fresh install starts from
   profiles/<id>.conf     one file per runner
@@ -26,7 +26,7 @@ and act on what these files say, so an inventory another account could edit
 would hand that account root. A complete working example is in
 [`examples/basic`](../examples/basic).
 
-`runnerslice validate` checks all of it offline. It needs no root and no host.
+`runner-slice validate` checks all of it offline. It needs no root and no host.
 
 ## `fabric.conf`: host policy
 
@@ -34,7 +34,7 @@ would hand that account root. A complete working example is in
 
 | Key | Required | Meaning |
 |---|---|---|
-| `slice` | once | The systemd slice every runner joins, for example `ci.slice`. A dash in the name is hierarchy (`ci-x.slice` lives inside `ci.slice`). systemd's own slices (`system.slice`, `user.slice`, `machine.slice` and anything inside them) are refused. |
+| `slice` | once | The systemd slice every runner joins. Prefer a single word, such as `ci.slice` or `runners.slice`. A dash in the name is hierarchy: `runner-slice.slice` would live inside an implicit, unlimited `runner.slice`. systemd's own slices (`system.slice`, `user.slice`, `machine.slice` and anything inside them) are refused. |
 | `name-prefix` | once | Units are `<prefix>-<id>-runner.service`, or `<prefix>-runner.service` for one runner. Runtime roots are `/var/lib/<prefix>-<id>`. |
 | `user-prefix` | once | Runner accounts are `<user-prefix>-<id>` (at most 32 characters in all). |
 | `host-label` | once | A runner label every profile on this host must carry, so a workflow can choose this host explicitly. |
