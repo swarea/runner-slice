@@ -409,7 +409,7 @@ step "runner release $RUNNER_VERSION"
 # The seed marker is written, root-owned, only after a complete unpack. An
 # unpack interrupted part-way leaves config.sh without it, and is redone
 # rather than mistaken for a runner. A registered runner is never re-seeded.
-SEED_MARKER="$FS_INSTALL_ROOT/.runnerslice-seeded"
+SEED_MARKER="$FS_INSTALL_ROOT/.runner-slice-seeded"
 if [ -x "$FS_RUNNER_DIR/config.sh" ] &&
    [ ! -f "$SEED_MARKER" ] && [ ! -f "$FS_RUNNER_DIR/.runner" ]; then
     change "complete an interrupted unpack of $RUNNER_ARCHIVE into $RUNNER_DIR"
