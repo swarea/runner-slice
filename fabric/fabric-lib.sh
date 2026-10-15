@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Offline primitives for runner-fabric: validation, mask derivation and unit
+# Offline primitives for RunnerSlice: validation, mask derivation and unit
 # rendering for a declared inventory of GitHub Actions runners.
 #
 # Nothing in this file requires root, GitHub access, registration credentials
@@ -931,7 +931,7 @@ fabric_render_slice() {
 
     cat <<'UNIT'
 [Unit]
-Description=GitHub Actions runners managed by runner-fabric
+Description=GitHub Actions runners managed by RunnerSlice
 
 [Slice]
 CPUAccounting=yes
