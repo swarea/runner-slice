@@ -18,9 +18,10 @@
 # nothing. It never restarts a runner while a job is in flight, or while it
 # cannot tell whether one is: it reports that as an outstanding action.
 #
-# Exit codes: 0 converged (or, under --check, nothing to do); 1 failure,
-# refusal, outstanding action or pending change; 2 usage; 10 (internal, fleet
-# children only) prepared and waiting for registration.
+# Exit codes: 0 converged, with nothing left to do (under --check: nothing
+# would change); 1 failure, refusal, a step left to a person such as
+# registration, or a pending change; 2 usage; 10 waiting for registration (for
+# fleet children) or for deregistration (for --retire).
 set -euo pipefail
 
 FABRIC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
