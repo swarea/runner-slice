@@ -58,12 +58,16 @@ Every `apply` line is one of:
        env HOME=/home/runner-app /var/lib/ci-app/runner/config.sh \
        --url https://github.com/<owner>/<repo> \
        --name <runner-name> --labels <labels> \
-       --work /var/lib/ci-app/work --unattended --replace
+       --work /var/lib/ci-app/work --unattended
    unset ACTIONS_RUNNER_INPUT_TOKEN
    sudo chmod 600 /var/lib/ci-app/runner/.runner /var/lib/ci-app/runner/.credentials /var/lib/ci-app/runner/.credentials_rsaparams
    ```
 
    Copy the exact command `apply` printed. It has your names and labels in it.
+
+   There is no `--replace`. If a runner of that name is already registered to
+   the repository, `config.sh` refuses, because that runner may be another
+   host's. Find out which it is before re-registering with `--replace`.
 
    The token travels in the environment, never as an argument. A command line
    is logged by sudo and shown by `ps` to every account, and anyone holding

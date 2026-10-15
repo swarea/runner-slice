@@ -744,7 +744,7 @@ _fabric_validate_fleet() {
     # across the whole fleet, pool or not, because a runner name, account, unit
     # or runtime root shared inside a pool is exactly as much a shared identity
     # as one shared between tenants -- and a shared runner name is worse, since
-    # registration runs with --replace and would take over the other runner.
+    # re-registration with --replace would take over the other runner.
     local pool prior_pool prior_labels labels
     for file in "${profiles[@]}"; do
         repo=$(fabric_value "$file" runner-repo)
