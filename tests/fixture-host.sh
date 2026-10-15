@@ -189,9 +189,13 @@ snapshot() {
 }
 
 register() { # ID   what config.sh would leave behind
-    local d="$H/root/var/lib/ci-$1/runner" f
+    local d="$H/root/var/lib/ci-$1/runner" f profile="$H/config/profiles/$1.conf"
+    printf '\xef\xbb\xbf{"agentId": 7, "agentName": "%s", "poolId": 1, "poolName": "Default", "serverUrl": "https://pipelines.example.invalid/", "gitHubUrl": "https://github.com/%s", "workFolder": "%s"}' \
+        "$(awk '$1 == "runner-name" { print $2 }' "$profile")" \
+        "$(awk '$1 == "runner-repo" { print $2 }' "$profile")" \
+        "$(awk '$1 == "work-dir" { print $2 }' "$profile")" > "$d/.runner"
+    : > "$d/.credentials"
     for f in .runner .credentials; do
-        : > "$d/$f"
         echo "runner-$1:runner-$1 600" > "$d/$f.owner"
     done
 }
