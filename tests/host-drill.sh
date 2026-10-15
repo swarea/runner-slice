@@ -41,12 +41,12 @@ echo '== the host location is not taken from the environment =='
 # whoever sets its environment. Sourcing the library must reset every root.
 # shellcheck disable=SC2016 # expanded by the inner shell, after sourcing
 got=$(env HOST_ROOT=/elsewhere CGROUP_ROOT=/elsewhere PROC_ROOT=/elsewhere \
-          UNIT_DIR=/elsewhere CHECK_ONLY=0 bash -c '
+          UNIT_DIR=/elsewhere TRUSTED_OWNER=nobody CHECK_ONLY=0 bash -c '
     . "$1/fabric/host-lib.sh"
-    printf "%s|%s|%s|%s" "$HOST_ROOT" "$CGROUP_ROOT" "$PROC_ROOT" "$UNIT_DIR"
+    printf "%s|%s|%s|%s|%s" "$HOST_ROOT" "$CGROUP_ROOT" "$PROC_ROOT" "$UNIT_DIR" "$TRUSTED_OWNER"
 ' _ "$ROOT")
-result "environment cannot move the host, cgroup, proc or unit roots" \
-    "|/sys/fs/cgroup|/proc|/etc/systemd/system" "$got"
+result "environment cannot move the host roots or the trusted owner" \
+    "|/sys/fs/cgroup|/proc|/etc/systemd/system|root" "$got"
 
 echo
 echo '== mask resolution =='
@@ -251,13 +251,27 @@ case "$unsafe" in
     *) result "a directory above the configuration is checked too" yes "no ($unsafe)" ;;
 esac
 
+# With the drill's own account as the trusted owner, each other reason a
+# path is unsafe can be seen on its own.
+mkdir -p "$T/cfg2/profiles"
+: > "$T/cfg2/fabric.conf"
+: > "$T/cfg2/profiles/plain.conf"
+: > "$T/cfg2/profiles/shared.conf"
+chmod g+w "$T/cfg2/profiles/shared.conf"
+ln -s "$T/cfg2/profiles/plain.conf" "$T/cfg2/profiles/linked.conf"
+unsafe=$(TRUSTED_OWNER=$(id -un); host_unsafe_paths "$T/cfg2")
+listed() { case " $unsafe " in *" $1 "*) echo yes ;; *) echo no ;; esac; }
+result "a plain file of the trusted owner is safe"  no  "$(listed "$T/cfg2/profiles/plain.conf")"
+result "a symlink is unsafe whoever owns it"         yes "$(listed "$T/cfg2/profiles/linked.conf")"
+result "a group-writable file is unsafe"            yes "$(listed "$T/cfg2/profiles/shared.conf")"
+
 echo
 echo '== preflight against a declared host =='
 
 # The real preflight, with the machine's answers faked: uname, id and
 # systemctl --version come from files, os-release and cgroup from the fixture.
 PF="$T/pf"
-mkdir -p "$PF/bin" "$PF/root/etc" "$PF/cg"
+mkdir -p "$PF/bin" "$PF/root/etc/systemd/system" "$PF/cg" "$PF/proc"
 cp -a "$ROOT/examples/basic" "$PF/config"
 cat > "$PF/bin/uname" <<'EOF'
 #!/usr/bin/env bash
@@ -271,6 +285,10 @@ cat > "$PF/bin/systemctl" <<'EOF'
 #!/usr/bin/env bash
 [ "$1" = --version ] && echo "systemd $(cat "$PF_STATE/systemd") (255.4-1ubuntu8)"
 EOF
+cat > "$PF/bin/nproc" <<'EOF'
+#!/usr/bin/env bash
+cat "$PF_STATE/cpus"
+EOF
 chmod +x "$PF/bin/"*
 export PF_STATE="$PF/state"
 mkdir -p "$PF_STATE"
@@ -280,18 +298,22 @@ pf_reset() {
     echo build-01 > "$PF_STATE/host"
     echo 1000 > "$PF_STATE/uid"
     echo 255 > "$PF_STATE/systemd"
+    echo 2 > "$PF_STATE/cpus"
     printf 'ID=ubuntu\nVERSION_ID="24.04"\n' > "$PF/root/etc/os-release"
-    : > "$PF/cg/cgroup.controllers"
+    echo 'cpuset cpu io memory hugetlb pids rdma misc' > "$PF/cg/cgroup.controllers"
+    printf 'MemTotal:        4015636 kB\nMemFree:          123456 kB\n' > "$PF/proc/meminfo"
+    rm -f "$PF/root/etc/systemd/system/"*
     sed -i '/^host-name/d' "$PF/config/fabric.conf"
 }
 pf() { # PRIVILEGE [COMMAND...]   prints rc:first warning
     local out rc=0
-    out=$(PATH="$PF/bin:$PATH" HOST_ROOT="$PF/root" CGROUP_ROOT="$PF/cg" FABRIC_DIR="$ROOT/fabric" \
-          bash -c '
+    out=$(PATH="$PF/bin:$PATH" bash -c '
               . "$1/fabric/fabric-lib.sh"; . "$1/fabric/host-lib.sh"
-              HOST_ROOT=$2; CGROUP_ROOT=$3; FABRIC_DIR=$4; shift 4
+              HOST_ROOT=$2; CGROUP_ROOT=$3; PROC_ROOT=$4; FABRIC_DIR=$5
+              UNIT_DIR="$HOST_ROOT/etc/systemd/system"; shift 5
               host_preflight "$@"
-          ' _ "$ROOT" "$PF/root" "$PF/cg" "$ROOT/fabric" "$PF/config" "$@" 2>&1) || rc=$?
+          ' _ "$ROOT" "$PF/root" "$PF/cg" "$PF/proc" "$ROOT/fabric" "$PF/config" "$@" 2>&1) || rc=$?
+    printf '%s\n' "$out" > "$T/pf.out"
     printf '%s:%s' "$rc" "$(grep -m1 -o 'WARN.*' <<<"$out" | sed 's/^WARN *//')"
 }
 
@@ -335,6 +357,94 @@ pf_reset
 
 result "a missing command is refused" "1:missing required commands: no-such-tool" \
     "$(pf --user no-such-tool)"
+
+echo 'cpuset cpu io pids' > "$PF/cg/cgroup.controllers"
+result "a host without the memory controller is refused" \
+    "1:cgroup controllers not available: memory" "$(pf --user)"
+pf_reset
+
+printf 'MemTotal:        1015636 kB\n' > "$PF/proc/meminfo"
+result "a memory ceiling above the host's memory is refused" \
+    "1:slice-memory-max 2G is more than this host's 991 MiB" "$(pf --user)"
+: > "$PF/proc/meminfo"
+result "unreadable host memory fails closed" \
+    "1:cannot compare slice-memory-max with this host's memory" "$(pf --user)"
+pf_reset
+
+sed -i 's/^slice-cpu-quota .*/slice-cpu-quota     300%/' "$PF/config/fabric.conf"
+result "a CPU quota above the host's CPUs is refused" \
+    "1:slice-cpu-quota 300% is more than this host's 2 CPUs (200%)" "$(pf --user)"
+sed -i 's/^slice-cpu-quota .*/slice-cpu-quota     100%/' "$PF/config/fabric.conf"
+pf_reset
+
+: > "$PF/root/etc/systemd/system/actions.runner.example-org-old.lab-old-01.service"
+result "a runner installed outside RunnerSlice is not refused" "0:" "$(pf --user)"
+result "it is reported as outside the slice" yes \
+    "$(grep -q 'not limited by its slice: actions.runner.example-org-old.lab-old-01.service' "$T/pf.out" && echo yes || echo no)"
+pf_reset
+
+echo
+echo '== accounts RunnerSlice did not create =='
+
+# getent answers from a file; the commands that would change accounts only
+# log. The real host_ensure_user and host_remove_user decide.
+ACC="$T/acct"
+mkdir -p "$ACC/root/etc"
+echo 'UID_MIN                  1000' > "$ACC/root/etc/login.defs"
+cat > "$T/bin/getent" <<'EOF'
+#!/usr/bin/env bash
+grep "^$2:" "$FAKE_ACCOUNTS.$1" 2>/dev/null
+EOF
+for c in groupadd useradd userdel groupdel; do
+    # shellcheck disable=SC2016 # the fake expands these when it runs
+    printf '#!/usr/bin/env bash\necho "%s $*" >> "$FAKE_ACCOUNTS.log"\n' "$c" > "$T/bin/$c"
+done
+chmod +x "$T/bin/"*
+export FAKE_ACCOUNTS="$ACC/db"
+
+account() { # NAME UID HOME
+    echo "$1:x:$2:$2::$3:/bin/bash" > "$FAKE_ACCOUNTS.passwd"
+    echo "$1:x:$2:" > "$FAKE_ACCOUNTS.group"
+    : > "$FAKE_ACCOUNTS.log"
+}
+acct() { # FUNCTION NAME   prints rc:first FAIL line
+    local out rc=0
+    out=$(HOST_ROOT="$ACC/root"; CHECK_ONLY=0; "$1" "$2" 2>&1) || rc=$?
+    printf '%s:%s' "$rc" "$(grep -m1 -o 'FAIL .*' <<<"$out" | sed 's/^FAIL *//')"
+}
+ours() { HOST_ROOT="$ACC/root"; host_account_is_ours "$1" && echo yes || echo no; }
+
+account runner-app 998 /home/runner-app
+result "a system account with its own home is RunnerSlice's" yes "$(ours runner-app)"
+result "it is kept as it is" "0:" "$(acct host_ensure_user runner-app)"
+
+account runner-app 1001 /home/runner-app
+result "an ordinary login account is not RunnerSlice's" no "$(ours runner-app)"
+result "it is not adopted" \
+    "1:account runner-app exists and is not a RunnerSlice system account; refusing to adopt it" \
+    "$(acct host_ensure_user runner-app)"
+result "and nothing was created for it" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
+result "it is not removed either" \
+    "0:account runner-app is not a RunnerSlice system account; not removing it" \
+    "$(acct host_remove_user runner-app)"
+result "and nothing was deleted" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
+
+account runner-app 998 /srv/runner-app
+result "a system account living elsewhere is not RunnerSlice's" no "$(ours runner-app)"
+account runner-app 0 /home/runner-app
+result "root by another name is not RunnerSlice's" no "$(ours runner-app)"
+
+account runner-app 998 /home/runner-app
+acct host_remove_user runner-app >/dev/null
+result "RunnerSlice's own account is removed with its home and group" \
+    "userdel --remove runner-app|groupdel runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+: > "$FAKE_ACCOUNTS.passwd"; : > "$FAKE_ACCOUNTS.group"; : > "$FAKE_ACCOUNTS.log"
+acct host_ensure_user runner-new >/dev/null
+result "a missing account is created as a system account" \
+    "groupadd --system runner-new|useradd --system --gid runner-new --home-dir /home/runner-new --create-home --shell /bin/bash runner-new" \
+    "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+rm -f "$T/bin/getent" "$T/bin/groupadd" "$T/bin/useradd" "$T/bin/userdel" "$T/bin/groupdel"
 
 echo
 echo '== mode comparison =='
