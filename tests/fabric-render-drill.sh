@@ -170,6 +170,44 @@ for profile in "$CI_DIR/profiles/"*.conf; do
 done
 
 echo
+echo '== slice rendering =='
+
+if diff <(fabric_render_slice "$CI_DIR") - <<'SLICE'
+[Unit]
+Description=GitHub Actions runners managed by runner-fabric
+
+[Slice]
+CPUAccounting=yes
+MemoryAccounting=yes
+TasksAccounting=yes
+CPUQuota=100%
+MemoryHigh=1536M
+MemoryMax=2G
+TasksMax=1024
+SLICE
+then
+    pass 'the example slice renders exactly its declared limits'
+else
+    fail 'the example slice rendering changed'
+fi
+
+F=$(fixture)
+sed -i -e '/^slice-memory-high/d' "$F/ci/fabric.conf"
+printf 'slice-cpu-weight    40\nslice-ip-deny       169.254.169.254/32\nslice-ip-deny       fd00:ec2::254\n' \
+    >> "$F/ci/fabric.conf"
+fabric_render_slice "$F/ci" > "$F/slice"
+if ! grep -q '^MemoryHigh=' "$F/slice" &&
+   has_line "$F/slice" 'CPUWeight=40' &&
+   has_line "$F/slice" 'IPAddressDeny=169.254.169.254/32' &&
+   has_line "$F/slice" 'IPAddressDeny=fd00:ec2::254'; then
+    pass 'optional limits render only when declared, and every deny entry renders'
+else
+    fail 'optional slice limits render wrongly'
+    cat "$F/slice" >&2
+fi
+rm -rf "$F"
+
+echo
 echo '== synthetic additional runner =='
 
 F=$(fixture)
