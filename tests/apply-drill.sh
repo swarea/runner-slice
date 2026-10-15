@@ -132,7 +132,7 @@ echo '== one runner: an interrupted unpack is completed, not trusted =='
 new_host interrupted
 only app
 apply --profile app
-rm -f "$H/root/var/lib/ci-app/.runnerslice-seeded" "$H/root/var/lib/ci-app/runner/bin/runsvc.sh"
+rm -f "$H/root/var/lib/ci-app/.runner-slice-seeded" "$H/root/var/lib/ci-app/runner/bin/runsvc.sh"
 apply --profile app --check
 expect_out 'the plan names the unfinished unpack' 'complete an interrupted unpack'
 apply --profile app
@@ -141,7 +141,7 @@ expect_rc 'and the run waits only for registration' 1
 expect_out 'registration is the outstanding step' 'register the runner, as a person'
 expect_lines 'the archive was fetched again' "$H/fake/curl.log" 2
 holds 'the missing file is restored' [ -x "$H/root/var/lib/ci-app/runner/bin/runsvc.sh" ]
-holds 'the seed marker records the release' grep -q '^2.338.0 ' "$H/root/var/lib/ci-app/.runnerslice-seeded"
+holds 'the seed marker records the release' grep -q '^2.338.0 ' "$H/root/var/lib/ci-app/.runner-slice-seeded"
 
 # ---------------------------------------------------------------------------
 echo

@@ -6,7 +6,7 @@ one Linux host that also does other work. This document says:
 - what it protects;
 - what it does not protect;
 - which mechanism each protection rests on;
-- how `runnerslice check` proves that mechanism on the running host.
+- how `runner-slice check` proves that mechanism on the running host.
 
 Every claim here is SYNTHETICALLY TESTED unless it says otherwise. Nothing in
 this document has yet been observed on a real host running this code. The
@@ -92,7 +92,7 @@ need namespaces opt into `userns` (decision 0002).
 ## How the check avoids repeating the declaration
 
 A check that read its expectations from the unit it checks could not notice
-the unit being wrong. So `runnerslice check` derives every expectation from the
+the unit being wrong. So `runner-slice check` derives every expectation from the
 inventory and the library, then reads the host:
 
 - **Installed units** are compared with a fresh rendering of the inventory.

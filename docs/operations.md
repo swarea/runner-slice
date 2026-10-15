@@ -7,12 +7,12 @@
 The command forms used throughout:
 
 ```text
-runnerslice [--config DIR] validate                 offline, any user
-runnerslice [--config DIR] plan    [PROFILE]        as root; changes nothing
-runnerslice [--config DIR] apply   [PROFILE]        as root
-runnerslice [--config DIR] retire  PROFILE [--check] as root
-runnerslice [--config DIR] check   [PROFILE]        as root; changes nothing
-runnerslice [--config DIR] status  [PROFILE]        as an ordinary user with gh
+runner-slice [--config DIR] validate                 offline, any user
+runner-slice [--config DIR] plan    [PROFILE]        as root; changes nothing
+runner-slice [--config DIR] apply   [PROFILE]        as root
+runner-slice [--config DIR] retire  PROFILE [--check] as root
+runner-slice [--config DIR] check   [PROFILE]        as root; changes nothing
+runner-slice [--config DIR] status  [PROFILE]        as an ordinary user with gh
 ```
 
 Without a profile, `plan`, `apply`, `check` and `status` act on every profile.
@@ -36,12 +36,12 @@ Every `apply` line is one of:
 ## The first runner
 
 1. **Write and validate the inventory** ([installation.md](installation.md),
-   [configuration.md](configuration.md)), then run `runnerslice validate`.
+   [configuration.md](configuration.md)), then run `runner-slice validate`.
 
-2. **See what apply would do.** `sudo runnerslice plan app` lists the account,
+2. **See what apply would do.** `sudo runner-slice plan app` lists the account,
    directories, download and units it would create. It changes nothing.
 
-3. **Apply.** `sudo runnerslice apply app` creates:
+3. **Apply.** `sudo runner-slice apply app` creates:
    - the account and its runtime root;
    - the release, downloaded and verified against its SHA-256;
    - the slice and service units.
@@ -75,8 +75,8 @@ Every `apply` line is one of:
    runs-on: [self-hosted, lab, app]
    ```
 
-7. **Prove it.** Run `sudo runnerslice check app` for the boundary and the
-   limits, then `runnerslice status app` for GitHub's view.
+7. **Prove it.** Run `sudo runner-slice check app` for the boundary and the
+   limits, then `runner-slice status app` for GitHub's view.
 
 ## More runners, and pools
 
@@ -109,7 +109,7 @@ Every `apply` line is one of:
 
 ## Retiring a runner
 
-`sudo runnerslice retire <id>` takes one safe step per run. Run it again after
+`sudo runner-slice retire <id>` takes one safe step per run. Run it again after
 each step a person takes.
 
 1. **Busy.** It refuses while a job runs. Drain the runner first, by removing
