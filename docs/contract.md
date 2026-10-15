@@ -41,21 +41,10 @@ An operator who:
 
 ## Evidence levels
 
-Every claim in this repository is labelled with the strongest level actually
-reached, never a stronger one:
-
-| Level | Meaning |
-|---|---|
-| DECLARED | written down as intended behaviour |
-| IMPLEMENTED | code exists |
-| SYNTHETICALLY TESTED | a drill exercised the real code against fixtures |
-| REAL CLIENT VERIFIED | GitHub accepted a registration and ran a job |
-| DEPLOYED | applied on a real host |
-| RUNTIME VERIFIED | observed on the running host (processes, cgroups, filters) |
-| REBOOT VERIFIED | still true after a reboot of that host |
-
-A green CI run is SYNTHETICALLY TESTED at most. It is never evidence of any of
-the levels below it in this table.
+Every claim is labelled with the strongest evidence level it has reached,
+never a stronger one. The levels, and what each kind of test can show, are
+defined in [verification.md](verification.md). A green CI run is SYNTHETICALLY
+TESTED at most.
 
 ## Origin and prior evidence
 
@@ -65,7 +54,7 @@ production web traffic, including a two-runner pool for one repository. That
 history is evidence that the design works. It is **not** evidence for this
 repository's code: the extraction changes names, defaults and the sandbox
 baseline, so every level above starts again at IMPLEMENTED here.
-`docs/field-report.md` (to be written) records what was learned, without host
+[field-report.md](field-report.md) records what was learned, without host
 identifiers.
 
 ## v1 scope
@@ -82,10 +71,14 @@ written from scratch unless the source could not be generalised.
 | Pools: several runners for one repository | `fabric/fabric-lib.sh` | SYNTHETICALLY TESTED |
 | Host preflight against the declaration: distribution, architecture, systemd, cgroup v2, optional hostname, root-only configuration | `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
 | Idempotent converge, busy-runner guard, `--check` plan mode | `fabric/fabric-apply.sh` | SYNTHETICALLY TESTED |
-| Registration as a person's step; retiring a pool member | `fabric/fabric-apply.sh` | SYNTHETICALLY TESTED |
+| Registration as a person's step; retiring any runner | `fabric/fabric-apply.sh` | SYNTHETICALLY TESTED |
 | Read-only runtime conformance | `fabric/fabric-check.sh` | SYNTHETICALLY TESTED |
 | Operational status from GitHub | `fabric/fabric-status.sh` | SYNTHETICALLY TESTED |
 | Optional deny list for the slice | `slice-ip-deny` in the policy | SYNTHETICALLY TESTED; provider-specific |
+| Refusing what RunnerSlice did not create: foreign units, human accounts, symlinked or non-root inventories | `fabric/fabric-apply.sh`, `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
+| Registration identity: the runner is registered as its profile says | `fabric/host-lib.sh` | SYNTHETICALLY TESTED |
+| One command: `runnerslice` | `bin/runnerslice` | SYNTHETICALLY TESTED |
+| Reproducible release archive with checksum | `scripts/release.sh` | SYNTHETICALLY TESTED |
 
 `tests/run.sh` is the one verification entry point: shellcheck, then every
 drill. The drills run the real scripts from a temporary copy whose library
@@ -145,94 +138,41 @@ fixed here. The source repository is not changed by this project.
 
 ## To verify on the test VM
 
-These are assumptions the drills encode as fixtures. Each must be observed on
-a real host before any claim beyond SYNTHETICALLY TESTED.
-
-- The runner registers and runs jobs under `RestrictNamespaces=yes`.
-- What `systemctl show` prints for `RestrictNamespaces` (restricted and
-  unrestricted), for `SupplementaryGroups`, and for `CPUQuotaPerSecUSec`.
-- Changed slice limits, and a changed `IPAddressDeny`, take effect for
-  running runners on daemon-reload, without a restart.
-- `ProtectHome=tmpfs` with `BindPaths` produces the mount table the check
-  expects.
-- Which packages the runner needs on the target Ubuntu release, if any, for
-  `apt-dependency`.
-- `useradd`, `install` and `tar` behave as the fixture doubles assume.
+The assumptions the drills encode as fixtures, and the lifecycle acceptance,
+are listed in [verification.md](verification.md). Nothing here claims more
+than SYNTHETICALLY TESTED until each is observed there.
 
 ## The CI evidence tool
 
-The source repository also has a read-only tool that judges a commit from
-GitHub's evidence: tested tree, policy and skipped-job semantics. It answers a
-different question ("what did CI actually prove?") from this project ("where
-and how do runners run?"). It also depends on its home repository's
-default-branch policy and on its own copy on that branch.
-
-**Decision:**
-
-- It stays out of v1 and stays in its source repository.
-- It is a candidate for its own small project later, decided on its own merits.
-- Nothing here depends on it, and nothing here removes it.
+The source repository's CI evidence verdict stays out of v1 and stays where it
+is. It remains a candidate for its own project (decision 0004).
 
 ## Supported platforms
 
-The policy is to list only what has been tested, at the level reached.
+Only what has been verified is listed, in [compatibility.md](compatibility.md).
+Preflight refuses anything other than Ubuntu with systemd 249 or later and
+cgroup v2.
 
-| Platform | Status |
-|---|---|
-| Ubuntu with systemd ≥ 249, cgroup v2, x86_64 | target for the first verification VM; not yet verified |
-| Ubuntu with systemd ≥ 249, cgroup v2, aarch64 | source of the prior evidence; not yet verified for this code |
-| Anything else | unsupported, and refused by preflight |
+## Security position
 
-## Security position (summary; full model in `docs/threat-model.md`)
-
-**What it does:**
-
-- Separates runners from each other and from declared host paths, using Unix
-  accounts, `ProtectHome`, `ProtectSystem`, `InaccessiblePaths`,
-  `NoNewPrivileges` and namespace restriction.
-- Bounds CPU, memory and task count for all runners together.
-
-**What it does not do:**
-
-- It is not a boundary against malicious code.
-- The kernel, the network and anything else the host can reach stay shared.
-- Membership of the `docker` group, or access to the Docker socket, is root on
-  the host. Runner accounts get no supplementary groups, and the checks verify
-  that from inside the runner's namespace.
+RunnerSlice separates runners from each other and from declared host paths,
+and bounds what they take together. It is not a boundary against malicious
+code: the kernel and the network stay shared, and access to the Docker socket
+is root on the host. The model, its mechanisms and its limits are in
+[threat-model.md](threat-model.md).
 
 ## Verification design
 
-Three paths, never merged into one claim:
+There are three paths, and they are never merged into one claim:
 
-1. **Public CI.**
-   - Runs on GitHub-hosted runners only.
-   - Covers static checks and every drill.
-   - Never connects to a self-hosted runner.
-2. **Dogfood acceptance.**
-   - A disposable VM, separate from any production host.
-   - Runners installed by this project, registered to a private test
-     repository that only the maintainer can push to.
-   - That repository's workflow checks out an approved, immutable commit of
-     this project and runs its drills.
-   - Each record keeps the commit tested and the tree checked out.
-   - Results do not appear as checks on public pull requests; a non-sensitive
-     summary goes into the release acceptance record.
-3. **Lifecycle acceptance on the same VM.** In order:
-   1. preflight
-   2. plan
-   3. apply
-   4. register
-   5. a real job
-   6. conformance
-   7. add a pool member
-   8. refuse to change a busy runner
-   9. re-apply with no restarts
-   10. reboot and re-check
-   11. retire, deregister and remove
-   12. confirm nothing is left behind
+1. **Public CI** on GitHub-hosted runners: static checks and every drill.
+2. **Dogfood:** RunnerSlice's own drills on runners it manages, on a
+   disposable VM, in a separate private repository.
+3. **Lifecycle acceptance** on that VM.
 
-The README may say "built and validated using runners managed by itself" only
-after paths 2 and 3 have run against a recorded commit.
+The details are in [verification.md](verification.md). The README may say
+RunnerSlice is validated on runners it manages only after paths 2 and 3 have
+run against one recorded commit.
 
 ## Release stages
 
@@ -248,11 +188,13 @@ The version follows the evidence. No stage is skipped to reach a number.
 ## Open decisions (owner)
 
 Decided on 2026-10-15: the name (decision 0003), the MIT licence, and a
-private `swarea/runnerslice` repository with rebase-only merges. Still open:
+private `swarea/runnerslice` repository with rebase-only merges. Still open,
+each a separate approval:
 
-- **Public visibility.** When the repository is made public, which is a
-  separate owner approval.
-- **Test VM.** Where it runs and with what resources. It must be separate from
-  production.
-- **Private dogfood repository.** Its creation, and the one-hour registration
-  token step.
+- **Public visibility**, and the first release.
+- **The verification VMs:** an ARM64 VM on the maintainer's laptop, and a
+  short-lived x86_64 cloud VM with a cost cap.
+- **The private dogfood repository** (proposed: `swarea/runnerslice-dogfood`),
+  and the registration-token steps.
+- **Hosted CI minutes** for the private repository, which are currently
+  blocked by billing.
