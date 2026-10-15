@@ -13,7 +13,7 @@ of it has run on a real host.
   - one policy file, one release seed and one profile per runner;
   - pools of several runners for one repository;
   - slice limits that must be declared, with no defaults.
-- **Commands:** `runnerslice validate`, `render`, `plan`, `apply`, `retire`,
+- **Commands:** `runner-slice validate`, `render`, `plan`, `apply`, `retire`,
   `check`, `status` and `version`.
 - **Apply:**
   - never restarts a runner whose job is running or whose state is unknown;
