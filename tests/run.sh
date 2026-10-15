@@ -16,7 +16,7 @@ command -v "$SHELLCHECK" >/dev/null || {
 }
 
 # find rather than git, so a release archive verifies the same way.
-mapfile -t scripts < <(cd "$ROOT" && find . -name '*.sh' -not -path './.git/*' | LC_ALL=C sort)
+mapfile -t scripts < <(cd "$ROOT" && { find . -name '*.sh' -not -path './.git/*'; echo ./bin/runnerslice; } | LC_ALL=C sort)
 (cd "$ROOT" && "$SHELLCHECK" "${scripts[@]}")
 echo "shellcheck: ${#scripts[@]} scripts clean"
 
