@@ -1,0 +1,7 @@
+# The same release for an aarch64 host. Copy over runner-release.conf there.
+runner-version   2.338.0
+runner-platform  linux-arm64
+runner-archive   actions-runner-linux-arm64-2.338.0.tar.gz
+runner-bytes     140012091
+runner-sha256    628b4a7258487b80c1d3c221095a7ded349f5ae0175fd3dfab708d07428f041b
+runner-url       https://github.com/actions/runner/releases/download/v2.338.0/actions-runner-linux-arm64-2.338.0.tar.gz
