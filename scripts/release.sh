@@ -48,7 +48,10 @@ fi
 name="runner-slice-$version"
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
-git archive --format=tar --prefix="$name/" HEAD | gzip -n -9 > "$OUT/$name.tar.gz"
+# git archive's default tar.umask is 0002, which leaves every file group-
+# writable. Root's preflight refuses a tool tree anyone but root could
+# change, so an archive unpacked as root must carry 0644/0755 modes.
+git -c tar.umask=0022 archive --format=tar --prefix="$name/" HEAD | gzip -n -9 > "$OUT/$name.tar.gz"
 (cd "$OUT" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
 
 printf 'built  %s\n' "$OUT/$name.tar.gz"
