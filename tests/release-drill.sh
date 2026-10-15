@@ -77,6 +77,14 @@ else
     fail 'the archive contents differ from the commit'
     diff "$T/expected.list" "$T/archive.list" | head >&2
 fi
+# Unpacked as root, the modes stay; root's preflight refuses a tool tree
+# anyone but root could change.
+writable=$(tar -tvzf "$T/a/$name.tar.gz" | awk 'substr($1, 6, 1) == "w" || substr($1, 9, 1) == "w" { print $NF }')
+if [ -z "$writable" ]; then
+    pass 'no entry in the archive is group- or world-writable'
+else
+    fail "group- or world-writable entries: $(head -3 <<<"$writable" | paste -sd' ' -)"
+fi
 if [ "$(tar -tzf "$T/a/$name.tar.gz" | grep -vc "^$name/")" -eq 0 ]; then
     pass 'everything is under one top-level directory'
 else
