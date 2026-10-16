@@ -339,6 +339,17 @@ pf_reset
 echo 245 > "$PF_STATE/systemd"
 result "a systemd older than the units need is refused" \
     "1:systemd '245' is older than 249 or unreadable" "$(pf --user)"
+
+# What the code accepts is wider than what has been verified. A version in
+# between passes, and says plainly that it is unverified.
+pf_reset; echo 252 > "$PF_STATE/systemd"
+result "a systemd the units accept but nobody verified passes, and says so" \
+    "0:systemd 252 is accepted but unverified; RunnerSlice has been verified on systemd 255 only" "$(pf --user)"
+pf_reset; echo 257 > "$PF_STATE/systemd"
+result "so does a newer one" \
+    "0:systemd 257 is accepted but unverified; RunnerSlice has been verified on systemd 255 only" "$(pf --user)"
+pf_reset
+result "the verified version passes without a warning" "0:" "$(pf --user)"
 pf_reset
 
 rm -f "$PF/cg/cgroup.controllers"
