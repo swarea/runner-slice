@@ -453,6 +453,29 @@ for id in docs web; do
         expect_out 'and says so' 'cannot tell whether any process runs as runner-docs'
         expect_same 'and nothing was removed' "$before"
         rm -rf "$H/proc"; mv "$H/proc.away" "$H/proc"
+        # A filesystem mounted below the runtime root -- a bigger disk at
+        # work/, a shared cache -- is someone's data. rm --one-file-system
+        # protects it only when the mount is below the argument it was given,
+        # so retirement refuses outright rather than rely on that.
+        cp "$H/proc/self/mountinfo" "$T/mountinfo.saved"
+        printf '97 22 0:55 / %s rw,relatime shared:60 - ext4 /dev/sdb1 rw\n' "$H/root/var/lib/ci-docs/work" >> "$H/proc/self/mountinfo"
+        : > "$H/root/var/lib/ci-docs/work/cache-data"
+        before=$(snapshot)
+        apply --retire docs
+        expect_rc 'a filesystem mounted below the runtime root blocks removal' 1
+        expect_out 'and it is named' "a filesystem is mounted at or below /var/lib/ci-docs: $H/root/var/lib/ci-docs/work"
+        expect_same 'and nothing was removed, not even on that filesystem' "$before"
+        cp "$T/mountinfo.saved" "$H/proc/self/mountinfo"
+        printf '97 22 0:55 / %s rw,relatime shared:60 - ext4 /dev/sdb1 rw\n' "$H/root/var/lib/ci-docs" >> "$H/proc/self/mountinfo"
+        apply --retire docs
+        expect_rc 'so does a runtime root that is itself a mount point' 1
+        cp "$T/mountinfo.saved" "$H/proc/self/mountinfo"
+        chmod 0000 "$H/proc/self/mountinfo"
+        apply --retire docs
+        chmod 0644 "$H/proc/self/mountinfo"
+        expect_rc 'a mount table that cannot be read blocks removal' 1
+        expect_out 'and says so' 'cannot read the mount table'
+        rm -f "$H/root/var/lib/ci-docs/work/cache-data"
         # userdel failing leaves the account; nothing that depends on it
         # being gone is removed, and a second run finishes the job.
         : > "$H/fake/userdel-fails"
@@ -474,6 +497,21 @@ for id in docs web; do
         refutes 'the account is already gone' [ -e "$H/fake/user-runner-docs" ]
         holds 'the unit is kept for the retry' is_rendered "$H/$UNITS/ci-docs-runner.service" docs
         holds 'and so is the marker that proves the root' [ -f "$H/root/var/lib/ci-docs/.runner-slice-root" ]
+        # The root's last step fails: the marker is written back, so the
+        # retry can still prove the root is this runner's.
+        : > "$H/fake/rmdir-fails"
+        apply --retire docs
+        rm -f "$H/fake/rmdir-fails"
+        expect_rc 'a runtime root whose last rmdir fails fails the retirement' 1
+        holds 'and its marker is written back' grep -qx docs "$H/root/var/lib/ci-docs/.runner-slice-root"
+        # The unit cannot be removed: reported, and no "retired".
+        chmod 0555 "$H/$UNITS"
+        apply --retire docs
+        chmod 0755 "$H/$UNITS"
+        expect_rc 'a unit that cannot be removed fails the retirement' 1
+        expect_out 'and it is named' 'could not remove'
+        expect_no 'and the run does not call itself retired' 'retired. Now delete'
+        holds 'the unit is still there for the retry' [ -e "$H/$UNITS/ci-docs-runner.service" ]
         apply --retire docs
         expect_rc 'a retry after a partial retirement completes it' 0
         refutes 'the runtime root is gone' [ -e "$H/root/var/lib/ci-docs" ]

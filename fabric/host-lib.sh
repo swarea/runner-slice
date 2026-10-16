@@ -292,7 +292,10 @@ host_remove_file() {
     local path=$1 reason=$2
     [ -e "$path" ] || { ok "no $path"; return 1; }
     change "remove $path ($reason)"
-    [ "$CHECK_ONLY" -eq 0 ] && rm -f "$path"
+    if [ "$CHECK_ONLY" -eq 0 ] && ! rm -f "$path"; then
+        fail "could not remove $path"
+        return 2
+    fi
     return 0
 }
 
@@ -392,8 +395,13 @@ host_ensure_user() {
 # group, as failures), and 1 when the account is still there. A caller stops
 # on 1: nothing that depends on the account being gone may be removed first.
 host_remove_user() {
-    local name=$1 entry gid="" rc=0 group
-    if entry=$(getent passwd "$name"); then
+    local name=$1 entry gid="" rc=0 group lrc=0
+    entry=$(getent passwd "$name") || lrc=$?
+    if [ "$lrc" -ne 0 ] && [ "$lrc" -ne 2 ]; then
+        fail "cannot look up account $name (getent exit $lrc); nothing was removed for it"
+        return 1
+    fi
+    if [ "$lrc" -eq 0 ]; then
         if ! host_account_is_ours "$name"; then
             fail "account $name is not a RunnerSlice system account; not removing it"
             return 1
@@ -418,7 +426,10 @@ host_remove_user() {
     fi
 
     group=$(getent group "$name") || return 0
-    if [ -n "$gid" ] && host_group_is_own_private "$group" "$gid"; then
+    if [ -n "$gid" ] && ! host_accounts_are_local; then
+        fail "group $name is left: this host also resolves accounts outside local files (nsswitch), so RunnerSlice cannot prove nothing else uses gid $gid"
+        note "  if nothing uses it, remove it by hand: groupdel $name"
+    elif [ -n "$gid" ] && host_group_is_own_private "$group" "$gid"; then
         change "remove group $name (gid $gid): the account's own group, which userdel left"
         if ! groupdel "$name"; then
             fail "groupdel could not remove group $name"
@@ -431,6 +442,48 @@ host_remove_user() {
         note "  if it is the leftover of this runner and nothing else uses it: groupdel $name"
     fi
     return 0
+}
+
+# host_accounts_are_local
+#
+# Whether every account this host resolves comes from local files. With a
+# directory service (sss, ldap, winbind...) enumerating passwd lists only
+# part of the accounts, so "no account uses this gid" cannot be proved.
+# No nsswitch.conf means glibc's default, files. An unreadable one is not
+# local.
+host_accounts_are_local() {
+    local conf="$HOST_ROOT/etc/nsswitch.conf" sources src
+    [ -e "$conf" ] || return 0
+    [ -r "$conf" ] || return 1
+    sources=$(awk '$1 == "passwd:" { $1 = ""; print }' "$conf")
+    for src in $sources; do
+        case "$src" in
+            files|systemd|compat|\[*) ;;
+            *) return 1 ;;
+        esac
+    done
+    return 0
+}
+
+# host_mounts_under PATH
+#
+# Mount points at or below PATH, from this process's mount table. Prints them
+# and returns 1 when there is any, returns 0 when there is none, and returns 2
+# when the table cannot be read. A runtime root with anything mounted in it
+# is never removed: the data on that filesystem is not RunnerSlice's.
+host_mounts_under() {
+    local root=$1 table="$PROC_ROOT/self/mountinfo" mp found="" lines=0
+    [ -r "$table" ] || return 2
+    while read -r _ _ _ _ mp _; do
+        lines=$((lines + 1))
+        # mountinfo escapes space, tab, newline and backslash as \ooo.
+        mp=$(printf '%b' "${mp//\\/\\0}")
+        case "$mp" in "$root"|"$root"/*) found+="${found:+ }$mp" ;; esac
+    done < "$table"
+    [ "$lines" -gt 0 ] || return 2
+    [ -z "$found" ] && return 0
+    printf '%s' "$found"
+    return 1
 }
 
 # host_group_is_own_private GROUP_ENTRY GID
@@ -541,8 +594,10 @@ host_job_state() {
 # 2 is never "none". This replaces pgrep, whose failure (missing, or exiting
 # 2 or 3) looked exactly like "no process" and let retirement go ahead.
 host_account_processes() {
-    local name=$1 entry uid status pid line found="" seen=0
-    entry=$(getent passwd "$name") || return 1
+    local name=$1 entry uid status pid line found="" seen=0 rc=0
+    # getent exits 2 for "no such account"; anything else is a failed lookup.
+    entry=$(getent passwd "$name") || rc=$?
+    case "$rc" in 0) ;; 2) return 1 ;; *) return 2 ;; esac
     uid=$(cut -d: -f3 <<<"$entry")
     [[ "$uid" =~ ^[0-9]+$ ]] || return 2
     for status in "$PROC_ROOT"/[0-9]*/status; do
