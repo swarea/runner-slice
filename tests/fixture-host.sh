@@ -103,6 +103,14 @@ cat > "$BIN/pgrep" <<'EOF'
 exit 3
 EOF
 
+# rmdir is the real one, unless the fixture makes it fail the way a racing
+# new entry would.
+cat > "$BIN/rmdir" <<'EOF'
+#!/usr/bin/env bash
+[ -e "${FAKE-}/rmdir-fails" ] && { echo "rmdir: failed to remove '${*: -1}': Directory not empty" >&2; exit 1; }
+exec /usr/bin/rmdir "$@"
+EOF
+
 cat > "$BIN/runuser" <<'EOF'
 #!/usr/bin/env bash
 while [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done
@@ -144,8 +152,10 @@ tar -czf "$ARCHIVE" -C "$PAYLOAD" .
 # new_host NAME   builds $T/NAME and points H at it
 new_host() {
     H="$T/$1"
-    mkdir -p "$H/root" "$H/cg" "$H/proc/1" "$H/fake"
+    mkdir -p "$H/root" "$H/cg" "$H/proc/1" "$H/proc/self" "$H/fake"
     printf 'Name:\tsystemd\nUid:\t0\t0\t0\t0\n' > "$H/proc/1/status"
+    # The mount table apply reads before removing a runtime root: only "/".
+    printf '22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n' > "$H/proc/self/mountinfo"
     cp -a "$ROOT/fabric" "$H/fabric"
     cp -a "$ROOT/examples/basic/." "$H/config/"
     : > "$H/fake/enabled"; : > "$H/fake/active"; : > "$H/fake/systemctl.log"
