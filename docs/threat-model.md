@@ -118,8 +118,13 @@ observed on a real host before it counts.
   argument: sudo logs command lines, and `ps` shows them to every account.
 - RunnerSlice never runs what the runner account can write. The installed
   version is read from the runner's dependency manifest as data. Files the
-  runner writes are opened without following symlinks, only if they are
-  small regular files.
+  runner writes (`.runner`, `bin/Runner.Listener.deps.json`) are reached by
+  opening the runner directory, which sits in a root-owned runtime root, and
+  then each component below it with `O_NOFOLLOW`. `O_NOFOLLOW` alone covers
+  only the last component, so the walk is what refuses a symlinked `bin/`.
+  Only a small regular file is read. Anything that cannot be read or parsed
+  that way, including a parser error such as deep nesting, is "cannot tell"
+  (exit 2), never a pass.
 - A registered runner's directory is never unpacked into again. A first
   unpack goes into a directory root has just created, closed to the runner
   account until it is handed over.

@@ -565,17 +565,48 @@ host_account_processes() {
     return 0
 }
 
-# Python run by root on files the runner account can write. It opens without
-# following a symlink, refuses anything but a small regular file, and never
-# executes what it reads.
+# Python run by root on files the runner account can write. The runner
+# directory itself sits in a root-owned install root, so the runner cannot
+# swap it; everything below it is the runner's to rename. safe_load therefore
+# opens the directory and walks down from it one component at a time with
+# O_NOFOLLOW, so a symlink anywhere below RUNNER_DIR -- not only in the last
+# component, which is all O_NOFOLLOW covers on its own -- is refused rather
+# than followed. It reads only a small regular file and never executes it.
+# Any failure, including one Python raises from inside the parser (deep
+# nesting is a RecursionError, not a ValueError), is "cannot tell": exit 2.
+# The exception hook is what guarantees that; nothing else catches those.
 HOST_SAFE_JSON_PY='
 import json, os, stat, sys
 
-def safe_load(path, limit=4 << 20):
+def _cannot_tell(kind, value, tb):
+    print(f"cannot read it safely ({kind.__name__})")
+    sys.stdout.flush()
+    os._exit(2)
+sys.excepthook = _cannot_tell
+
+def safe_load(base, rel, limit=4 << 20):
+    parts = rel.split("/")
+    if any(p in ("", ".", "..") for p in parts):
+        raise ValueError("bad path")
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     except OSError as e:
         raise ValueError(f"cannot open ({e.strerror})")
+    try:
+        for part in parts[:-1]:
+            try:
+                nfd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            except OSError as e:
+                raise ValueError(f"cannot open {part}/ ({e.strerror})")
+            os.close(fd)
+            fd = nfd
+        try:
+            ffd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd)
+        except OSError as e:
+            raise ValueError(f"cannot open ({e.strerror})")
+    finally:
+        os.close(fd)
+    fd = ffd
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
@@ -609,15 +640,17 @@ host_runner_version() {
     python3 -I -c "$HOST_SAFE_JSON_PY"'
 import re
 try:
-    data = safe_load(sys.argv[1])
-    libs = data.get("libraries", {}) if isinstance(data, dict) else {}
-    found = [k.split("/", 1)[1] for k in libs if isinstance(k, str) and k.startswith("Runner.Listener/")]
+    data = safe_load(sys.argv[1], "bin/Runner.Listener.deps.json")
 except ValueError:
     sys.exit(2)
+libs = data.get("libraries") if isinstance(data, dict) else None
+if not isinstance(libs, dict):
+    sys.exit(2)
+found = [k.split("/", 1)[1] for k in libs if isinstance(k, str) and k.startswith("Runner.Listener/")]
 if len(found) != 1 or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", found[0]):
     sys.exit(2)
 print(found[0])
-' "$1/bin/Runner.Listener.deps.json"
+' "$1"
 }
 
 # host_registration_state RUNNER_DIR REPO NAME WORK_DIR
@@ -632,7 +665,7 @@ host_registration_state() {
     python3 -I -c "$HOST_SAFE_JSON_PY"'
 path, repo, name, work = sys.argv[1:5]
 try:
-    data = safe_load(path, 1 << 20)
+    data = safe_load(path, ".runner", 1 << 20)
 except ValueError as e:
     print(f".runner {e}")
     sys.exit(2)
@@ -653,7 +686,7 @@ if problems:
     print("; ".join(problems))
     sys.exit(1)
 print("ok")
-' "$1/.runner" "$2" "$3" "$4"
+' "$1" "$2" "$3" "$4"
 }
 
 # ---------------------------------------------------------------------------
