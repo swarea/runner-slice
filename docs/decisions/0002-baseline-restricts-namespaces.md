@@ -26,5 +26,6 @@ a restriction it did not have.
 - **Jobs that fail on `baseline`:** any job that creates namespaces. That
   covers rootless containers, `unshare`, `bwrap` and some test harnesses. They
   need `userns`, chosen per profile.
-- **Not yet verified:** that the GitHub runner itself works under
-  `RestrictNamespaces=yes`. This is checked on the test VM before Alpha.
+- **Verified on the ARM64 test VM:** the GitHub runner registers and runs
+  jobs under `RestrictNamespaces=yes`, and `unshare -U` is refused inside
+  them ([verification.md](../verification.md), assumption 1).

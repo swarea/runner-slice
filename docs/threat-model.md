@@ -8,9 +8,13 @@ one Linux host that also does other work. This document says:
 - which mechanism each protection rests on;
 - how `runner-slice check` proves that mechanism on the running host.
 
-Every claim here is SYNTHETICALLY TESTED unless it says otherwise. Nothing in
-this document has yet been observed on a real host running this code. The
-evidence levels are defined in [verification.md](verification.md).
+Every claim here is SYNTHETICALLY TESTED by the drills. The boundary was also
+observed on one real host, an Ubuntu 24.04 aarch64 VM with systemd 255 and two
+real GitHub runners, at RUNTIME VERIFIED and REBOOT VERIFIED. It was observed
+both by `check` and from inside real jobs
+([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)). On any other
+host, these claims are unverified. The evidence levels are defined in
+[verification.md](verification.md).
 
 ## Who is trusted
 
