@@ -19,8 +19,9 @@ operator has to do.
 
 ## Supported versions
 
-There is no release yet. Until there is, fixes land on `main` only. Once
-there is, only the latest release receives fixes.
+There is no release. RunnerSlice is a public alpha whose development has
+ended. A report is still read, and a confirmed fix lands on `main`, which is
+the only supported version.
 
 ## In scope
 

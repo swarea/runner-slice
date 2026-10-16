@@ -143,21 +143,11 @@ Each run records:
 
 ### Environments
 
-Creating either environment needs owner approval, and so does any cost.
-
 - **ARM64:** an Ubuntu 24.04 aarch64 VM on the maintainer's Apple-silicon
-  laptop.
-  - Candidate tools are UTM or Lima with Apple's Virtualization framework,
-    2 vCPU and 4 GiB.
-  - Before relying on it, check: systemd PID 1 and cgroup v2 with the
-    `cpu`, `memory` and `pids` controllers; outbound access to GitHub;
-    reboot behaviour; and the laptop's free memory while it runs.
-- **x86_64:** a short-lived Ubuntu 24.04 x86_64 cloud VM.
-  - About 2 vCPU and 4 GiB, created for the run and deleted after it.
-  - It must be in an account or project separate from production, with no
-    access to production networks.
-  - The provider, cost cap, run time and deletion procedure are decided before
-    it is created.
+  laptop: Lima with Apple's Virtualization framework, 2 vCPU, 3 GiB, NAT, no
+  shared folders. It was used for every real-host result above. It was
+  deleted on 2026-10-17, after its results were recorded.
+- **x86_64:** none. No x86_64 host has run RunnerSlice, and none is planned.
 
 ### Dogfood
 
@@ -169,9 +159,8 @@ retired when the acceptance ended.
   and runs `tests/run.sh` on the VM's runners.
 - **Each run records** the commit, the tree, and the runner that ran it.
 - **These results never appear as checks on RunnerSlice pull requests.** A
-  non-sensitive summary goes into the release record.
+  non-sensitive summary is in the acceptance record.
 
-The README may say RunnerSlice is validated on runners it manages only after
-a dogfood run and the lifecycle acceptance have both been recorded for one
-commit. The dogfood runners are retired when the acceptance ends. That
-retirement is item 15.
+Both were recorded on the ARM64 VM. The dogfood runners were retired when the
+acceptance ended (item 15), and the dogfood repository is archived, with its
+run history kept.

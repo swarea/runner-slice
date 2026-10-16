@@ -25,7 +25,7 @@ Which combinations have actually been verified is recorded in
 
 ## Get the release archive
 
-There is no published release yet. Build the archive from a commit you have
+No release is published. Build the archive from a commit you have
 reviewed:
 
 ```sh
@@ -37,8 +37,8 @@ bash scripts/release.sh --out ../dist --snapshot   # -dev versions need --snapsh
 ```
 
 The build is reproducible: the same commit gives the same bytes and the same
-`runner-slice-<version>.tar.gz.sha256`. When releases are published, verify the
-download against the published checksum:
+`runner-slice-<version>.tar.gz.sha256`. To check an archive someone else
+built, rebuild it from the same commit and compare the checksum:
 
 ```sh
 sha256sum -c runner-slice-<version>.tar.gz.sha256

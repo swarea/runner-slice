@@ -8,7 +8,7 @@ actually been verified, and at what level ([verification.md](verification.md)).
 
 | Distribution | Architecture | systemd | Status |
 |---|---|---|---|
-| Ubuntu 24.04 | x86_64 | 255 | **Planned** for the first verification VM. Not yet verified. |
+| Ubuntu 24.04 | x86_64 | 255 | **Not verified.** Preflight accepts it; no x86_64 host has run RunnerSlice. |
 | Ubuntu 24.04 | aarch64 | 255 | **Verified** on a disposable VM (Lima, Apple Virtualization), at RUNTIME VERIFIED and REBOOT VERIFIED. See [acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md). The lifecycle was run with two real GitHub runners, ending in deregistration and retirement. One VM; no other aarch64 host verified. |
 | Ubuntu 22.04 | aarch64 | 249 | The code RunnerSlice was extracted from has run here in production (see [field-report.md](field-report.md)). **This code** has not been run there. Not supported. |
 | Any other distribution | | | Refused by preflight. |
