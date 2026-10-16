@@ -62,37 +62,21 @@ survived and why.
 ### Assumptions the fixtures encode
 
 The drills prove that the scripts judge their inputs correctly. They do not
-prove that a real host produces those inputs. Each of these must be observed on
-the integration VM:
+prove that a real host produces those inputs. Each assumption below was
+checked on the ARM64 acceptance VM
+([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)). An x86_64 host
+has not been checked.
 
-1. The runner registers and runs jobs under `RestrictNamespaces=yes`.
-2. What `systemctl show` prints for:
-   - `RestrictNamespaces`, restricted and not;
-   - `SupplementaryGroups`;
-   - `CPUQuotaPerSecUSec`;
-   - `IPAddressDeny`;
-   - `IPAddressAllow`;
-   - `MemoryHigh` when it is unset.
-3. Changed slice limits and a changed `IPAddressDeny` reach running runners
-   through a daemon reload, with no restart. This has to be shown by the
-   runners' cgroup files and IP filter programs, not by the reload's exit
-   code.
-4. `ProtectHome=tmpfs` with `BindPaths` produces the mount table the check
-   expects.
-   - `InaccessiblePaths` masks appear as mounts whose root is
-     `/systemd/inaccessible/...`, the field the check reads.
-   - They resolve as the check expects, including `/var/run` aliases.
-5. Registration and the files it reads:
-   - `.runner` has the fields `agentName`, `gitHubUrl` and `workFolder`, and
-     a UTF-8 BOM;
-   - `config.sh` takes the token from `ACTIONS_RUNNER_INPUT_TOKEN` and
-     accepts the printed command;
-   - `bin/Runner.Listener.deps.json` names the installed release as
-     `Runner.Listener/<version>`, after self-updates too. RunnerSlice reads
-     the version there and never executes the runner.
-6. Which packages, if any, the runner needs on the target Ubuntu release.
-7. `useradd --system` gives a uid below `UID_MIN`, with home `/home/NAME`.
-8. GitHub's "remove all custom labels" endpoint drains a runner.
+| # | Assumption | Result on Ubuntu 24.04 aarch64, systemd 255 |
+|---|---|---|
+| 1 | The runner registers and runs jobs under `RestrictNamespaces=yes` | **Holds.** Real jobs ran, and `unshare -U` was refused inside them. |
+| 2 | What `systemctl show` prints | **Partly wrong, fixed.** `RestrictNamespaces` prints `yes`, `no` or a list, not an empty value; the check now expects that. `CPUQuotaPerSecUSec=1s`, byte values for memory, `/32` on `IPAddressDeny`, and empty `IPAddressAllow` and `SupplementaryGroups` are as assumed. `MemoryHigh` when unset was not observed. |
+| 3 | Slice changes reach running processes on reload, without a restart | **Holds**, for `IPAddressDeny` and `memory.max`. It was shown on a live process in the slice by its connections and cgroup files, with the same PID before and after. The live runners carried the deny from their start, and real jobs could not reach it. |
+| 4 | The mount table the check reads | **Holds.** Masks are mounts rooted at `/systemd/inaccessible/…`. `/home` is a tmpfs with only the account's own home bound. Read from the real Listener process. |
+| 5 | Registration files and inputs | **Holds.** `.runner` has a UTF-8 BOM and the fields `agentName`, `gitHubUrl` and `workFolder`. `config.sh` reads `ACTIONS_RUNNER_INPUT_TOKEN`, for both registration and removal. `deps.json` names `Runner.Listener/2.338.0`. A runner self-update was not observed. |
+| 6 | Packages the runner needs | **`liblttng-ust1t64`** is the only one missing from the Ubuntu 24.04 cloud image. |
+| 7 | `useradd --system` gives uid < `UID_MIN` with home `/home/NAME` | **Holds** (uids 995 and 997). |
+| 8 | Removing a runner's custom labels drains it | **Holds** as far as observed: after removal, only `self-hosted`, `Linux` and `ARM64` remained. That no job was then assigned was not separately tested. |
 
 ## Lifecycle acceptance
 
@@ -103,24 +87,27 @@ recorded commit. Each item is marked:
 - **synthetic**: covered by drills only;
 - **unverified**: not done yet.
 
-| # | Step | Status |
+| # | Step | Status (ARM64 VM) |
 |---|---|---|
-| 1 | Install on a clean VM, from the release archive | unverified (synthetic: release drill) |
-| 2 | Preflight accepts the VM and refuses a broken declaration | unverified (synthetic) |
-| 3 | Profile validation | unverified (synthetic) |
-| 4 | Slice and service applied | unverified (synthetic) |
-| 5 | Real GitHub registration, with identity confirmed by apply | unverified |
-| 6 | RunnerSlice's drills run as a job on its own runner | unverified |
-| 7 | Account, groups, masks and home namespace, as `check` and by hand | unverified (synthetic) |
-| 8 | Resource limits in effect: the cgroup files under load | unverified |
-| 9 | A second runner as a pool member, and jobs spread across it | unverified (synthetic) |
-| 10 | A unit change while a job runs is deferred, and applied after it | unverified (synthetic) |
-| 11 | Re-apply changes nothing, and restarts nothing | unverified (synthetic) |
-| 12 | Reboot: units start, `check` passes, limits and filters are present | unverified |
-| 13 | Failure and recovery: an interrupted unpack, a killed apply, a misregistration | unverified (synthetic) |
-| 14 | Deregistration | unverified |
-| 15 | Retirement removes exactly what RunnerSlice created | unverified (synthetic) |
-| 16 | Nothing left behind: units, accounts, directories, and runners on GitHub | unverified |
+| 1 | Install on a clean VM, from the release archive | **PASS.** Found #16 (the archive was group-writable); fixed |
+| 2 | Preflight accepts the VM and refuses a broken declaration | **PASS** |
+| 3 | Profile validation | **PASS** |
+| 4 | Slice and service applied | **PASS** |
+| 5 | Real GitHub registration, with identity confirmed by apply | **PASS.** Two runners |
+| 6 | RunnerSlice's drills run as a job on its own runner | **PASS.** 436 cases, on each runner |
+| 7 | Account, groups, masks and home namespace, as `check` and by hand | **PASS.** `check`, the live process, and boundary jobs |
+| 8 | Resource limits in effect: the cgroup files under load | **PASS.** Both runners busy, held to one CPU and MemoryHigh |
+| 9 | A second runner as a pool member, and jobs spread across it | **PASS.** Jobs observed on each; assignment is GitHub's |
+| 10 | A unit change while a job runs is deferred, and applied after it | **PASS.** Real hold jobs; exactly one restart afterwards |
+| 11 | Re-apply changes nothing, and restarts nothing | **PASS** |
+| 12 | Reboot: units start, `check` passes, limits and filters are present | **PASS.** Guest reboot; boundary jobs after it |
+| 13 | Failure and recovery: an interrupted unpack, a killed apply, a misregistration | **PASS** for the killed download and the killed unpack. A misregistration stays SYNTHETIC |
+| 14 | Deregistration | **PASS.** Found a rejected `--unattended`; fixed |
+| 15 | Retirement removes exactly what RunnerSlice created | **PASS** |
+| 16 | Nothing left behind: units, accounts, directories, and runners on GitHub | **PASS.** Only the shared slice unit remains, by design |
+
+Unknown job state could not be produced safely on a healthy host as root, so
+it remains SYNTHETICALLY TESTED. x86_64 is not verified.
 
 Each run records:
 
