@@ -83,6 +83,7 @@ run_block "$T/register.sh" >/dev/null
 refutes 'a gh that fails never reaches config.sh' [ -e "$T/sudo.log" ]
 rm -f "$T/gh-fails"
 holds 'the verified release is unpacked' [ -x "$H/root/var/lib/ci-app/runner/config.sh" ]
+holds "the runner directory stayed 0700 through the unpack, not the archive's 0775" grep -qx 700 "$H/fake/tar-dir-mode"
 expect_lines 'the archive was downloaded once' "$H/fake/curl.log" 1
 expect_lines 'the declared package was installed' "$H/fake/apt.log" 1
 holds 'the slice unit is the rendering' is_rendered "$H/$UNITS/ci.slice" slice
