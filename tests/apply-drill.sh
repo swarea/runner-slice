@@ -317,6 +317,9 @@ apply --retire web-2
 expect_rc 'an idle member stops at deregistration' 10
 expect_out 'the deregistration command is printed' 'actions/runners/remove-token'
 expect_out 'deregistration runs config.sh in the runner directory' 'env -C /var/lib/ci-web-2/runner HOME=/home/runner-web-2 ./config.sh remove'
+# config.sh remove accepts --token, --pat and --local only (actions/runner
+# v2.338.0); --unattended is a configure flag and is reported as unrecognised.
+expect_no 'deregistration passes no flag remove does not accept' 'config.sh remove --unattended'
 holds 'it is stopped and disabled first' grep -q '^disable ci-web-2-runner.service' "$H/fake/systemctl.log"
 holds 'its registration is left for the person' [ -e "$H/root/var/lib/ci-web-2/runner/.runner" ]
 
