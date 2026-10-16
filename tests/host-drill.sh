@@ -589,6 +589,45 @@ result "an account that does not exist has no processes to find" "1:" "$(procs r
 rm -f "$T/bin/getent"
 
 echo
+echo '== files the runner writes, read safely or not at all =='
+
+RJ="$T/runner-json"
+mkdir -p "$RJ/good/bin" "$RJ/bindir" "$RJ/link/bin" "$RJ/fifo/bin" "$RJ/big/bin" "$RJ/deep/bin" "$RJ/type/bin" "$RJ/ctl"
+printf '\xef\xbb\xbf{"agentName": "a", "gitHubUrl": "https://github.com/o/r", "workFolder": "/w"}' > "$RJ/good/.runner"
+printf '{"libraries": {"Runner.Listener/2.338.0": {}}}' > "$RJ/good/bin/Runner.Listener.deps.json"
+ln -s "$RJ/good/.runner" "$RJ/link/.runner"
+ln -s "$RJ/good/bin" "$RJ/bindir/bin"
+mkfifo "$RJ/fifo/.runner" "$RJ/fifo/bin/Runner.Listener.deps.json"
+# Valid, and matching, but past the size limit: only the limit refuses it.
+python3 -c 'import json; print(json.dumps({"agentName": "a", "gitHubUrl": "https://github.com/o/r", "workFolder": "/w", "pad": " " * 2000000}))' > "$RJ/big/.runner"
+python3 -c 'print("[" * 200000)' > "$RJ/deep/.runner"
+python3 -c 'print("[" * 200000)' > "$RJ/deep/bin/Runner.Listener.deps.json"
+# A list holding the right name would yield a version if the shape were
+# not checked.
+printf '{"libraries": ["Runner.Listener/2.338.0"]}' > "$RJ/type/bin/Runner.Listener.deps.json"
+printf '[]' > "$RJ/type/.runner"
+printf '{"agentName": "a\\u001b[2J", "gitHubUrl": "https://github.com/o/r\\u001b]0;x\\u0007", "workFolder": "/w"}' > "$RJ/ctl/.runner"
+
+# shellcheck disable=SC2016 # the inner shell expands these
+reg() { local out rc=0; out=$(timeout 10 bash -c '. "$1/fabric/fabric-lib.sh"; . "$1/fabric/host-lib.sh"; host_registration_state "$2" o/r a /w' _ "$ROOT" "$1" 2>&1) || rc=$?; printf '%s' "$rc"; }
+# shellcheck disable=SC2016 # the inner shell expands these
+ver() { local rc=0; timeout 10 bash -c '. "$1/fabric/fabric-lib.sh"; . "$1/fabric/host-lib.sh"; host_runner_version "$2"' _ "$ROOT" "$1" >/dev/null 2>&1 || rc=$?; printf '%s' "$rc"; }
+result "a matching registration is ok"                 0 "$(reg "$RJ/good")"
+result "a .runner that is a symlink is not followed"   2 "$(reg "$RJ/link")"
+result "a .runner that is a FIFO is not waited on"     2 "$(reg "$RJ/fifo")"
+result "an oversized .runner is refused"               2 "$(reg "$RJ/big")"
+result "a deeply nested .runner is 'cannot tell'"      2 "$(reg "$RJ/deep")"
+result "a .runner that is not an object is 'cannot tell'" 2 "$(reg "$RJ/type")"
+result "a manifest reached through a symlinked bin/ is not followed" 2 "$(ver "$RJ/bindir")"
+result "a manifest read safely gives the version"      0 "$(ver "$RJ/good")"
+result "a manifest that is a FIFO is not waited on"    2 "$(ver "$RJ/fifo")"
+result "a deeply nested manifest is 'cannot tell'"     2 "$(ver "$RJ/deep")"
+result "a manifest with the wrong shape is 'cannot tell'" 2 "$(ver "$RJ/type")"
+out=$(bash -c '. "$1/fabric/fabric-lib.sh"; . "$1/fabric/host-lib.sh"; host_registration_state "$2" o/r a /w' _ "$ROOT" "$RJ/ctl" 2>&1)
+result "what .runner says is printed with control characters escaped" yes \
+    "$(printf '%s' "$out" | grep -q "$(printf '\033')" && echo no || echo yes)"
+
+echo
 echo '== mode comparison =='
 
 m() { host_mode_eq "$1" "$2" && echo same || echo differs; }
