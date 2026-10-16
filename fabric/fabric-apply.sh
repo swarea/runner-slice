@@ -305,7 +305,7 @@ if [ "$MODE" = retire ]; then
         note ""
         note "  export ACTIONS_RUNNER_INPUT_TOKEN=\"\$(gh api -X POST /repos/$RUNNER_REPO/actions/runners/remove-token --jq .token)\""
         note "  sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u $RUNNER_USER -H \\"
-        note "      env -C $RUNNER_DIR HOME=$RUNNER_HOME ./config.sh remove --unattended"
+        note "      env -C $RUNNER_DIR HOME=$RUNNER_HOME ./config.sh remove"
         note "  unset ACTIONS_RUNNER_INPUT_TOKEN"
         note ""
         note "  if GitHub cannot be reached from here, delete the runner on GitHub instead and then"
