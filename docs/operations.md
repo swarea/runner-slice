@@ -1,8 +1,9 @@
 # Operations
 
-> **Status: pre-release.** The commands and outputs below are what the code
-> does under its drills. They have not yet been observed on a real host
-> ([verification.md](verification.md)).
+> **Status: pre-release.** The lifecycle below was run end to end on one real
+> Ubuntu 24.04 aarch64 host with two GitHub runners
+> ([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)). Unknown job state
+> and misregistration are exercised by drills only.
 
 The command forms used throughout:
 

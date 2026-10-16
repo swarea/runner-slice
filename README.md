@@ -15,10 +15,16 @@ web server.
 >
 > - Every behaviour described here is exercised by drills against a fixture
 >   host. That is SYNTHETICALLY TESTED.
-> - Nothing in this code has yet been run on a real host or registered with
->   GitHub. That verification is the next stage, and its plan is in
->   [docs/verification.md](docs/verification.md).
-> - Do not run it on a machine you care about yet.
+> - The full lifecycle has also run on **one real host**: an Ubuntu 24.04
+>   aarch64 VM with two real GitHub runners. It went from install to
+>   registration, jobs, pool, busy guard, reboot, deregistration and
+>   retirement ([docs/acceptance/2026-10-arm64.md](docs/acceptance/2026-10-arm64.md)).
+> - RunnerSlice's own drills ran there as GitHub Actions jobs, on runners
+>   RunnerSlice installed and managed.
+> - **Not verified:** x86_64, other distributions, and GitHub-hosted CI for
+>   this repository. GitHub-hosted CI is currently blocked by the
+>   organisation's billing.
+> - No release exists. Use a machine you can afford to rebuild.
 
 ## Why
 
@@ -94,9 +100,9 @@ fleet with the runners idle, and register the new runner.
 ## Supported hosts
 
 Ubuntu with systemd 249 or later, cgroup v2 and x86_64 or aarch64 is what
-preflight accepts. **No combination has been verified with this code yet.**
-[docs/compatibility.md](docs/compatibility.md) is the only list of what has
-been.
+preflight accepts. **Verified so far: Ubuntu 24.04 on aarch64 (systemd 255),
+on one VM.** [docs/compatibility.md](docs/compatibility.md) is the only list of
+what has been verified.
 
 ## Documentation
 

@@ -1,10 +1,8 @@
 # Installation
 
-> **Status: pre-release.** These steps follow what the code does and are
-> exercised by drills against a fixture host. They have not yet been carried
-> out on a real host. That is the next verification stage
-> ([verification.md](verification.md)). Until it is done, use a disposable
-> machine.
+> **Status: pre-release.** These steps were carried out on one real host: an
+> Ubuntu 24.04 aarch64 VM ([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)).
+> No x86_64 host has been verified. Use a machine you can afford to rebuild.
 
 ## Requirements
 
@@ -103,4 +101,10 @@ To roll back, move the symlink back and apply again.
 1. Retire every runner, deregistering each from GitHub ([operations.md](operations.md)).
 2. Remove `/usr/local/bin/runner-slice` and `/opt/runner-slice-<version>`.
 3. Remove `/etc/runner-slice` and the slice unit in `/etc/systemd/system`.
+   The slice unit is the one thing retirement leaves on purpose, because it is
+   shared by every runner. Once the last profile is gone, `runner-slice`
+   refuses an empty inventory and will not remove it for you.
 4. Run `systemctl daemon-reload`.
+
+Packages installed for `apt-dependency` stay installed. RunnerSlice never
+removes packages, because other software may need them.
