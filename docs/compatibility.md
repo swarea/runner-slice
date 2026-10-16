@@ -10,13 +10,36 @@ actually been verified, and at what level ([verification.md](verification.md)).
 |---|---|---|---|
 | Ubuntu 24.04 | x86_64 | 255 | **Planned** for the first verification VM. Not yet verified. |
 | Ubuntu 24.04 | aarch64 | 255 | **Verified** on a disposable VM (Lima, Apple Virtualization), at RUNTIME VERIFIED and REBOOT VERIFIED. See [acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md). The lifecycle was run with two real GitHub runners, ending in deregistration and retirement. One VM; no other aarch64 host verified. |
-| Ubuntu 22.04 | aarch64 | 249 | The code RunnerSlice was extracted from has run here in production (see [field-report.md](field-report.md)). **This code** has not been run there. |
+| Ubuntu 22.04 | aarch64 | 249 | The code RunnerSlice was extracted from has run here in production (see [field-report.md](field-report.md)). **This code** has not been run there. Not supported. |
 | Any other distribution | | | Refused by preflight. |
+
+## systemd: accepted is not supported
+
+Two ranges differ, on purpose, and neither stands in for the other.
+
+| | Versions | Meaning |
+|---|---|---|
+| **Supported** | 255 | Verified on a real host by the acceptance above. |
+| **Accepted, unverified** | 249–254, and 256 or later | Preflight lets these through, and warns, naming the version as unverified. Nothing about them has been observed on a host. |
+| **Refused** | older than 249 | Preflight refuses. |
+
+Why the code accepts more than is supported. The floor of 249 is what the
+units rely on: `ProtectHome=tmpfs` with `BindPaths`, and a slice's
+`IPAddressDeny` merged into every unit inside it. The one value `check` was
+found to depend on in a version-specific way is how `systemctl show` prints
+`RestrictNamespaces` (`yes`, `no`, or a list). That printing code
+(`src/shared/bus-print-properties.c`) was read, not run, in the v249, v252
+and v255 sources and is the same in all three. That is a source review. It
+is not verification, and it covers only that one property. Raising the floor
+to 255 would refuse hosts that nothing shows are broken. Calling them
+supported would claim what nothing shows works. So they are accepted with a
+warning, and only 255 is listed as supported.
 
 Preflight refuses:
 
 - a distribution other than Ubuntu;
-- systemd older than 249;
+- systemd older than 249 (249–254 and 256 or later pass with a warning that
+  they are unverified);
 - a host without the cgroup v2 unified hierarchy, or without its `cpu`,
   `memory` or `pids` controller;
 - an architecture other than the release seed's.

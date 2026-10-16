@@ -8,7 +8,9 @@
 
 What preflight refuses to work without:
 
-- **Ubuntu**, with systemd 249 or later.
+- **Ubuntu**, with systemd 249 or later. Only systemd 255 is supported, that
+  is, verified. Preflight warns on any other accepted version
+  ([compatibility.md](compatibility.md)).
 - **The cgroup v2 unified hierarchy**, with the `cpu`, `memory` and `pids`
   controllers available.
 - **x86_64 or aarch64**, matching the `runner-platform` of the release seed.

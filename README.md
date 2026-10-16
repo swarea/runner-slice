@@ -100,8 +100,9 @@ fleet with the runners idle, and register the new runner.
 ## Supported hosts
 
 Ubuntu with systemd 249 or later, cgroup v2 and x86_64 or aarch64 is what
-preflight accepts. **Verified so far: Ubuntu 24.04 on aarch64 (systemd 255),
-on one VM.** [docs/compatibility.md](docs/compatibility.md) is the only list of
+preflight accepts. What is supported is narrower: **verified so far, Ubuntu
+24.04 on aarch64 (systemd 255), on one VM.** Preflight warns on any systemd
+other than 255. [docs/compatibility.md](docs/compatibility.md) is the only list of
 what has been verified.
 
 ## Documentation
