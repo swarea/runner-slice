@@ -109,6 +109,21 @@ recorded commit. Each item is marked:
 Unknown job state could not be produced safely on a healthy host as root, so
 it remains SYNTHETICALLY TESTED. x86_64 is not verified.
 
+The retirement and reader changes from the post-acceptance review (#18) were
+run on the same VM, at RUNTIME VERIFIED, with a test-only profile that was
+never registered. That run covered:
+
+- leftover processes, by effective and by saved uid;
+- `userdel` failing;
+- a runtime root that could only be partly removed, and the retry after it;
+- `USERGROUPS_ENAB no`;
+- a group in use, and a leftover home;
+- a symlinked `bin/`;
+- the unpack mode.
+
+The results are in [the acceptance record](acceptance/2026-10-arm64.md). An
+unreadable `/proc`, and malformed runner files, remain SYNTHETICALLY TESTED.
+
 Each run records:
 
 - the RunnerSlice commit and tree;
