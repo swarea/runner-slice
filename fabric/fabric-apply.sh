@@ -533,10 +533,14 @@ else
             || { echo "runner archive digest mismatch; refusing to unpack" >&2; exit 1; }
         note "archive digest verified"
         # Unregistered, so nothing here is the runner's yet: start from an
-        # empty directory only root can enter, then hand it over.
+        # empty directory only root can enter, then hand it over. tar would
+        # otherwise give that directory the archive's own mode for "." (0775
+        # in the official archive) while it unpacks; --no-overwrite-dir keeps
+        # it 0700 until the chmod below. The root above it is root:<account>
+        # 0750 either way, so no other account could have reached it.
         rm -rf --one-file-system -- "$FS_RUNNER_DIR"
         mkdir -m 0700 "$FS_RUNNER_DIR"
-        tar -xzf "$WORK/release/$RUNNER_ARCHIVE" -C "$FS_RUNNER_DIR" --no-same-owner
+        tar -xzf "$WORK/release/$RUNNER_ARCHIVE" -C "$FS_RUNNER_DIR" --no-same-owner --no-overwrite-dir
         chown -R "$RUNNER_USER:$RUNNER_USER" "$FS_RUNNER_DIR"
         chmod 0750 "$FS_RUNNER_DIR"
         printf '%s %s\n' "$RUNNER_VERSION" "$RUNNER_SHA" > "$SEED_MARKER"
