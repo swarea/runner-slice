@@ -33,7 +33,11 @@ TRUSTED_OWNER=root
 
 # The oldest systemd whose behaviour the units rely on: ProtectHome=tmpfs with
 # BindPaths, and a slice's IPAddressDeny merged into every unit inside it.
+# Accepting a version is not having verified it. Only the versions listed in
+# FABRIC_VERIFIED_SYSTEMD have run the acceptance on a real host
+# (docs/compatibility.md); any other accepted version is named as unverified.
 FABRIC_MIN_SYSTEMD=249
+FABRIC_VERIFIED_SYSTEMD="255"
 
 # ---------------------------------------------------------------------------
 # Reporting
@@ -153,6 +157,10 @@ host_preflight() {
     systemd_version=${systemd_version%%[!0-9]*}
     if [ -n "$systemd_version" ] && [ "$systemd_version" -ge "$FABRIC_MIN_SYSTEMD" ]; then
         ok "systemd $systemd_version"
+        case " $FABRIC_VERIFIED_SYSTEMD " in
+            *" $systemd_version "*) ;;
+            *) warn "systemd $systemd_version is accepted but unverified; RunnerSlice has been verified on systemd $FABRIC_VERIFIED_SYSTEMD only" ;;
+        esac
     else
         warn "systemd '${systemd_version:-unknown}' is older than $FABRIC_MIN_SYSTEMD or unreadable"
         failed=1
