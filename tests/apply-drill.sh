@@ -365,14 +365,61 @@ for id in docs web; do
     expect_rc "$id stops at deregistration" 10
     rm -f "$H/root/var/lib/ci-$id/runner/.runner" "$H/root/var/lib/ci-$id/runner/.credentials"
     if [ "$id" = docs ]; then
+        cp "$H/$UNITS/ci-docs-runner.service" "$T/docs.unit"
         # A job's leftover process blocks the removal; nothing is removed.
-        echo 4242 > "$H/fake/procs-runner-docs"
+        mkdir -p "$H/proc/4242"
+        printf 'Name:\tleftover\nUid:\t999\t999\t999\t999\n' > "$H/proc/4242/status"
         apply --retire docs
         expect_rc 'a leftover process of the runner blocks its removal' 1
         expect_out 'and is named' 'processes of runner-docs are still running (4242)'
         holds 'its runtime root is still there' [ -d "$H/root/var/lib/ci-docs" ]
         holds 'and so is its unit' [ -e "$H/$UNITS/ci-docs-runner.service" ]
-        rm -f "$H/fake/procs-runner-docs"
+        # One that dropped to root but kept the account as its saved uid can
+        # become the account again, so it counts as the account's too.
+        printf 'Name:\tleftover\nUid:\t0\t0\t999\t0\n' > "$H/proc/4242/status"
+        apply --retire docs
+        expect_rc 'a process holding the account only as its saved uid blocks removal' 1
+        expect_out 'and is named' 'processes of runner-docs are still running (4242)'
+        rm -rf "$H/proc/4242"
+        # A process table that cannot be read is not an empty one -- and a
+        # failing pgrep (the fixture's exits 3) is not consulted at all.
+        mv "$H/proc" "$H/proc.away"; mkdir "$H/proc"
+        before=$(snapshot)
+        apply --retire docs
+        expect_rc 'a process table that cannot be read blocks removal' 1
+        expect_out 'and says so' 'cannot tell whether any process runs as runner-docs'
+        expect_same 'and nothing was removed' "$before"
+        rm -rf "$H/proc"; mv "$H/proc.away" "$H/proc"
+        # userdel failing leaves the account; nothing that depends on it
+        # being gone is removed, and a second run finishes the job.
+        : > "$H/fake/userdel-fails"
+        apply --retire docs
+        expect_rc 'a failing account removal fails the retirement' 1
+        expect_out 'and says what was left' "nothing else was removed; /var/lib/ci-docs and ci-docs-runner.service are left as they were"
+        holds 'the account is still there' [ -e "$H/fake/user-runner-docs" ]
+        holds 'its runtime root is still there' [ -f "$H/root/var/lib/ci-docs/.runner-slice-root" ]
+        holds 'and so is its unit' is_rendered "$H/$UNITS/ci-docs-runner.service" docs
+        rm -f "$H/fake/userdel-fails"
+        # The account removed but the root not: the unit is kept, the marker
+        # still proves the root, and a retry removes it.
+        mkdir -p "$H/root/var/lib/ci-docs/stuck"; : > "$H/root/var/lib/ci-docs/stuck/file"
+        chmod 0500 "$H/root/var/lib/ci-docs/stuck"
+        apply --retire docs
+        chmod 0700 "$H/root/var/lib/ci-docs/stuck"
+        expect_rc 'a runtime root that cannot be removed fails the retirement' 1
+        expect_out 'and says what was left' 'could not remove all of /var/lib/ci-docs; ci-docs-runner.service is left in place'
+        refutes 'the account is already gone' [ -e "$H/fake/user-runner-docs" ]
+        holds 'the unit is kept for the retry' is_rendered "$H/$UNITS/ci-docs-runner.service" docs
+        holds 'and so is the marker that proves the root' [ -f "$H/root/var/lib/ci-docs/.runner-slice-root" ]
+        apply --retire docs
+        expect_rc 'a retry after a partial retirement completes it' 0
+        refutes 'the runtime root is gone' [ -e "$H/root/var/lib/ci-docs" ]
+        refutes 'and the unit' [ -e "$H/$UNITS/ci-docs-runner.service" ]
+        # Put docs back as it was, for the cases that follow.
+        : > "$H/fake/user-runner-docs"
+        mkdir -p "$H/root/var/lib/ci-docs/runner"
+        echo docs > "$H/root/var/lib/ci-docs/.runner-slice-root"
+        cp "$T/docs.unit" "$H/$UNITS/ci-docs-runner.service"
         # A unit someone else put in place of RunnerSlice's is not removed.
         cp "$H/$UNITS/ci-docs-runner.service" "$T/docs.saved"
         printf '[Unit]\nDescription=replaced by hand\n' > "$H/$UNITS/ci-docs-runner.service"
@@ -398,6 +445,40 @@ expect_lines 'no runtime root remains' <(find "$H/root/var/lib" -mindepth 1 -max
 refutes 'no runner account remains' compgen -G "$H/fake/user-*"
 expect_lines 'no service is enabled' "$H/fake/enabled" 0
 expect_lines 'no service is active' "$H/fake/active" 0
+
+# ---------------------------------------------------------------------------
+echo
+echo '== retirement removes only a root it can prove belongs to this runner =='
+# ---------------------------------------------------------------------------
+new_host markers
+only app
+apply --profile app
+apply --retire app
+expect_rc 'an unregistered runner is ready for removal' 0
+# Retire leaves nothing to tamper with when it succeeds, so set the runner
+# up again, unregistered and stopped, before each case.
+reset_app() {
+    rm -rf "$H/root/var/lib/ci-app"
+    apply --profile app >/dev/null 2>&1 || true
+    apply --retire app --check >/dev/null 2>&1 || true
+}
+for marker in none other link; do
+    reset_app
+    m="$H/root/var/lib/ci-app/.runner-slice-root"
+    case "$marker" in
+        none)  rm -f "$m" ;;
+        other) echo web > "$m" ;;
+        link)  echo app > "$T/marker-elsewhere"; rm -f "$m"; ln -s "$T/marker-elsewhere" "$m" ;;
+    esac
+    # Stop it the way retire does, so only the marker decides.
+    sed -i '/^ci-app-runner.service$/d' "$H/fake/enabled" "$H/fake/active"
+    before=$(snapshot)
+    apply --retire app
+    expect_rc "a root whose marker is $marker is not removed" 1
+    expect_out 'and it is named' 'refusing to remove /var/lib/ci-app: it is not a runtime root RunnerSlice created for this runner'
+    expect_same 'and nothing else is removed either' "$before"
+    holds 'not even the account' [ -e "$H/fake/user-runner-app" ]
+done
 
 # ---------------------------------------------------------------------------
 echo

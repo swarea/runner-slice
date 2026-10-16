@@ -135,8 +135,18 @@ each step a person takes.
 3. **Deregister.** It stops with exit code 10 until a person has deregistered
    the runner (the command is printed). If GitHub is unreachable, delete the
    runner on GitHub and remove the registration files by hand.
-4. **Remove.** It removes the unit, the runtime root and the account. Only
-   things RunnerSlice created are removed.
+4. **Remove.** It checks everything first: the unit is RunnerSlice's, the
+   runtime root carries this profile's marker, the account has RunnerSlice's
+   shape, and no process runs as the account. Any uid counts: real,
+   effective, saved or filesystem. If `/proc` cannot be read, it removes
+   nothing. Then it removes, in this order:
+   - the account, its home, and its own group;
+   - the runtime root, with its marker last;
+   - the unit.
+
+   Removal is not atomic. If a step fails, the steps after it are not taken,
+   what is left is reported by name, and running `retire` again continues
+   from there. Only things RunnerSlice created are removed.
 
 Then delete the profile and apply the remaining runners. Their units drop the
 mask for the retired root.
@@ -154,5 +164,33 @@ mask for the retired root.
 | `check`: `NOT masked in namespace` | The running service does not have a mask its unit declares. Usually it was started before the unit changed. | `apply` with the runner idle restarts it with the current unit. |
 | `check`: `differs from the rendering`, `unexpected drop-in` | Someone edited a unit or added a drop-in. | Remove the drop-in, then `apply`. |
 | `check`: `runner version ... below the seed` | Self-update is not working. | Re-seed by hand, with the runner idle (`apply` prints how). Registration files survive an unpack. |
+| `retire`: `processes of ... are still running` | A job left a process behind, possibly one that only kept the account as its saved uid. | Stop it (`ps -eo pid,ruid,euid,suid,cmd`), then `retire` again. Nothing was removed. |
+| `retire`: `cannot tell whether any process runs as ...` | `/proc` could not be read. | Find out why. Nothing was removed. |
+| `retire`: `userdel could not remove ...` | The account is still there. | Nothing else was removed. The unit and runtime root still identify the runner. Fix the cause, then `retire` again. |
+| `retire`: `could not remove all of ...` | The account is gone; part of the runtime root is not, perhaps a mount below it or an immutable file. | The unit and the root's marker are kept. Fix the cause, then `retire` again; it finishes the root, then the unit. |
+| `retire`: `/home/... is still there without its account` | `userdel` removed the account but not its home. | Look at what is in it, then remove it by hand. Until then, `apply` refuses to create the account again. |
+| `retire`: `group ... exists without its account` | The account is already gone, so RunnerSlice can no longer prove the group was its own. This is found on a later run, after the group was not removed on the run that removed the account. | If nothing else uses it (`getent group <name>`, `awk -F: '$4 == <gid>' /etc/passwd`), remove it by hand: `groupdel <name>`. |
+| `retire` or `apply`: `refusing to remove ...` / `... exists and was not created by RunnerSlice` (runtime root) | The root has no marker, or the marker names another profile or is a symlink. RunnerSlice cannot prove the directory is this runner's, so it never takes it over or removes it. | See "A runtime root without its marker" below. |
+| `apply`: `group ... exists without an account of that name` or `/home/... exists without an account` | A leftover of an earlier install, or someone else's. | If it is a leftover and nothing uses it, remove it by hand (`groupdel`, `rm -rf`), then `apply`. |
 | `status`: `remote runner is not online` | GitHub does not see the runner. | Look at the service journal: `journalctl -u <service>`. |
 | After a reboot | Units are enabled and start with the host. | Run `check`. Then run `status`. |
+
+### A runtime root without its marker
+
+`/var/lib/<prefix>-<id>/.runner-slice-root` is root-owned and names its
+profile. Without it, RunnerSlice will not adopt or remove the directory.
+That holds even if RunnerSlice created it, for example when someone deleted
+the marker or restored the directory from a backup without it. Nothing
+recreates the marker automatically. Writing a marker is a claim that the
+whole directory is this runner's, and it is a person's decision:
+
+1. Check that the runner is stopped: `systemctl status <service>`.
+2. Look at what is in the directory. If any of it is not this runner's, move
+   that out first, or rename the profile and leave the directory alone.
+3. If the runner was registered, deregister it on GitHub. Its `.credentials`
+   are in this directory.
+4. Either remove the directory by hand, or restore the marker. To restore
+   it, run `printf '%s\n' <id> | sudo tee /var/lib/<prefix>-<id>/.runner-slice-root`,
+   then `sudo chown root:root` and `sudo chmod 0644` on the marker. The id
+   is the profile's file name without `.conf`.
+5. Run `apply` or `retire` again.
