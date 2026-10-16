@@ -367,6 +367,19 @@ if [ "$MODE" = retire ]; then
             *)  fail "cannot tell whether any process runs as $RUNNER_USER"
                 removable=0 ;;
         esac
+        # rm --one-file-system skips a mount only below the argument it was
+        # given, so a filesystem mounted at work/ or runner/ would be emptied.
+        # Anything mounted in the root is refused before anything is removed.
+        mrc=0
+        mounts=$(host_mounts_under "$FS_INSTALL_ROOT") || mrc=$?
+        case "$mrc" in
+            0)  ;;
+            1)  fail "a filesystem is mounted at or below $INSTALL_ROOT: $mounts"
+                note "  unmount it, and move what is on it if it is to be kept"
+                removable=0 ;;
+            *)  fail "cannot read the mount table; cannot tell whether anything is mounted below $INSTALL_ROOT"
+                removable=0 ;;
+        esac
         if [ "$removable" -ne 1 ]; then
             note "nothing was removed"
             host_report_apply
@@ -384,13 +397,17 @@ if [ "$MODE" = retire ]; then
         fi
         # The marker is removed last: a removal that stops part-way must leave
         # the proof that the rest is RunnerSlice's, or no retry could finish.
+        # If the final rmdir fails, the marker is written back for the same
+        # reason. --preserve-root=all also refuses any child that is a mount
+        # point, should one appear after the check above.
         if [ -e "$FS_INSTALL_ROOT" ]; then
             change "remove $INSTALL_ROOT"
             if [ "$CHECK_ONLY" -eq 0 ] &&
                ! { find "$FS_INSTALL_ROOT" -mindepth 1 -maxdepth 1 ! -name .runner-slice-root \
-                       -exec rm -rf --one-file-system -- {} + &&
+                       -exec rm -rf --one-file-system --preserve-root=all -- {} + &&
                    rm -f -- "$FS_INSTALL_ROOT/.runner-slice-root" &&
-                   rmdir -- "$FS_INSTALL_ROOT"; }; then
+                   { rmdir -- "$FS_INSTALL_ROOT" ||
+                     { printf '%s\n' "$PROFILE_ID" > "$FS_INSTALL_ROOT/.runner-slice-root"; false; }; }; }; then
                 fail "could not remove all of $INSTALL_ROOT; $SERVICE is left in place"
                 note "fix the cause above, then run --retire $PROFILE_ID again"
                 host_report_apply
@@ -402,7 +419,8 @@ if [ "$MODE" = retire ]; then
             systemctl daemon-reload
         fi
         if [ "$check_failed" -eq 1 ]; then
-            note "the runner is removed, but what is reported above was left behind"
+            note "not fully retired: what is reported above was left behind"
+            note "fix it, then run --retire $PROFILE_ID again"
         else
             note "retired. Now delete profiles/$PROFILE_ID.conf and run --all with the other"
             note "runners idle: their units drop the mask for $INSTALL_ROOT."

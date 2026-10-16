@@ -148,9 +148,22 @@ each step a person takes.
    - the runtime root, with its marker last;
    - the unit.
 
-   Removal is not atomic. If a step fails, the steps after it are not taken,
-   what is left is reported by name, and running `retire` again continues
-   from there. Only things RunnerSlice created are removed.
+   It also refuses, removing nothing, while any filesystem is mounted at or
+   below the runtime root, or while the mount table cannot be read.
+
+   Removal is not atomic:
+   - if the account, or the runtime root, cannot be removed, the steps after
+     it are not taken;
+   - a leftover home or group is reported, but the root and the unit are
+     still removed.
+
+   Either way the run exits 1, names what is left, and running `retire` again
+   continues from there. Only things RunnerSlice created are removed.
+
+   Between a partial failure and its retry, the files left behind are owned
+   by a uid and gid that no longer exist. The next system account created on
+   the host may be given the same ids. Finish the retirement before creating
+   other accounts.
 
 Then delete the profile and apply the remaining runners. Their units drop the
 mask for the retired root.
@@ -171,7 +184,11 @@ mask for the retired root.
 | `retire`: `processes of ... are still running` | A job left a process behind, possibly one that only kept the account as its saved uid. | Stop it (`ps -eo pid,ruid,euid,suid,cmd`), then `retire` again. Nothing was removed. |
 | `retire`: `cannot tell whether any process runs as ...` | `/proc` could not be read. | Find out why. Nothing was removed. |
 | `retire`: `userdel could not remove ...` | The account is still there. | Nothing else was removed. The unit and runtime root still identify the runner. Fix the cause, then `retire` again. |
-| `retire`: `could not remove all of ...` | The account is gone; part of the runtime root is not, perhaps a mount below it or an immutable file. | The unit and the root's marker are kept. Fix the cause, then `retire` again; it finishes the root, then the unit. |
+| `retire`: `could not remove all of ...` | The account is gone; part of the runtime root is not, for example an immutable file. | The unit and the root's marker are kept. If the last `rmdir` failed, the marker is written back. Fix the cause, then `retire` again; it finishes the root, then the unit. |
+| `retire`: `a filesystem is mounted at or below ...` | Something is mounted in the runtime root, for example a larger disk at `work/`. | Nothing was removed. Unmount it, and keep what is on it if you need it, then `retire` again. |
+| `retire`: `cannot read the mount table` / `cannot look up account ...` | `/proc/self/mountinfo` was unreadable, or the account lookup failed rather than answering "no such account". | Nothing was removed. Find out why, then `retire` again. |
+| `retire`: `group ... is left: this host also resolves accounts outside local files` | Accounts also come from a directory service (`nsswitch.conf`), so not every user of the gid can be listed. | Check that nothing uses the gid, then `groupdel <name>`. |
+| `retire`: `could not remove /etc/systemd/system/...` | The unit file could not be deleted, for example on a read-only `/etc`. | Fix the cause, then `retire` again. |
 | `retire`: `/home/... is still there without its account` | `userdel` removed the account but not its home. | Look at what is in it, then remove it by hand. Until then, `apply` refuses to create the account again. |
 | `retire`: `group ... exists without its account` | The account is already gone, so RunnerSlice can no longer prove the group was its own. This is found on a later run, after the group was not removed on the run that removed the account. | If nothing else uses it (`getent group <name>`, `awk -F: '$4 == <gid>' /etc/passwd`), remove it by hand: `groupdel <name>`. |
 | `retire` or `apply`: `refusing to remove ...` / `... exists and was not created by RunnerSlice` (runtime root) | The root has no marker, or the marker names another profile or is a symlink. RunnerSlice cannot prove the directory is this runner's, so it never takes it over or removes it. | See "A runtime root without its marker" below. |
