@@ -366,28 +366,77 @@ host_ensure_user() {
     return 0
 }
 
-# host_remove_user NAME   the account, its home and its private group only
+# host_remove_user NAME
+#
+# The account, its home and its own group -- and nothing that is not
+# provably those. userdel is not atomic: it can remove the account and fail
+# on the home (exit 12), and with USERGROUPS_ENAB no in login.defs it leaves
+# the account's group behind. So the outcome is read back afterwards rather
+# than inferred from the exit code, and whatever is left is reported by name.
+#
+# A group left behind is removed only when it is this account's own: the same
+# name, the gid the account had as its primary group, no member, and no other
+# account using it as its primary group. Anything else is someone's, and is
+# left. Once the account is gone that proof is gone with it, so a group found
+# on a later run, without the account, is reported and never removed.
+#
+# Returns 0 when the account is gone (it may still report a leftover home or
+# group, as failures), and 1 when the account is still there. A caller stops
+# on 1: nothing that depends on the account being gone may be removed first.
 host_remove_user() {
-    local name=$1
-    if getent passwd "$name" >/dev/null; then
+    local name=$1 entry gid="" rc=0 group
+    if entry=$(getent passwd "$name"); then
         if ! host_account_is_ours "$name"; then
             fail "account $name is not a RunnerSlice system account; not removing it"
-            return 0
+            return 1
         fi
+        gid=$(cut -d: -f4 <<<"$entry")
         change "remove user $name, its home and its own group"
-        if [ "$CHECK_ONLY" -eq 0 ] && ! userdel --remove "$name"; then
-            fail "userdel could not remove $name; nothing else was changed for it"
-            return 0
+        [ "$CHECK_ONLY" -eq 0 ] || return 0
+        userdel --remove "$name" || rc=$?
+        if getent passwd "$name" >/dev/null; then
+            fail "userdel could not remove $name (exit $rc); the account is still there"
+            return 1
         fi
+        [ "$rc" -eq 0 ] || warn "userdel removed $name but exited $rc; what it left is reported below"
     else
         ok "user $name is absent"
     fi
-    # userdel removes the account's own group with it. A group of that name
-    # left behind is not the account's, so it is reported, never deleted.
-    if [ "$CHECK_ONLY" -eq 0 ] && getent group "$name" >/dev/null; then
-        note "group $name still exists; it was not created with this account, so it is left"
+    [ "$CHECK_ONLY" -eq 0 ] || return 0
+
+    if [ -e "$HOST_ROOT/home/$name" ] || [ -L "$HOST_ROOT/home/$name" ]; then
+        fail "/home/$name is still there without its account; it is not removed automatically"
+        note "  look at what is in it, then remove it by hand: rm -rf --one-file-system /home/$name"
+    fi
+
+    group=$(getent group "$name") || return 0
+    if [ -n "$gid" ] && host_group_is_own_private "$group" "$gid"; then
+        change "remove group $name (gid $gid): the account's own group, which userdel left"
+        if ! groupdel "$name"; then
+            fail "groupdel could not remove group $name"
+            note "  remove it by hand once nothing uses it: groupdel $name"
+        fi
+    elif [ -n "$gid" ]; then
+        note "group $name is left: it is not $name's own unused group (another account uses it, or it has members)"
+    else
+        fail "group $name exists without its account; RunnerSlice can no longer tell whether it was this runner's"
+        note "  if it is the leftover of this runner and nothing else uses it: groupdel $name"
     fi
     return 0
+}
+
+# host_group_is_own_private GROUP_ENTRY GID
+#
+# Whether a group entry (name:x:gid:members) is an account's own private
+# group: the given gid, no member, and the primary group of no account that
+# still exists. Enumerating passwd is what proves "no one else uses it".
+host_group_is_own_private() {
+    local entry=$1 gid=$2 g_gid members users
+    g_gid=$(cut -d: -f3 <<<"$entry")
+    members=$(cut -d: -f4 <<<"$entry")
+    [[ "$gid" =~ ^[0-9]+$ ]] && [ "$g_gid" = "$gid" ] && [ -z "$members" ] || return 1
+    users=$(getent passwd) || return 1
+    ! awk -F: -v g="$gid" '$4 == g { found = 1 } END { exit !found }' <<<"$users"
 }
 
 # host_owner_mode PATH   "user:group mode", as stat reports them
@@ -471,6 +520,41 @@ host_job_state() {
     done < "$procs"
 
     return 1
+}
+
+# host_account_processes NAME
+#
+# The pids of every process that runs as account NAME by any of the uids the
+# kernel keeps for it -- real, effective, saved or filesystem -- read from
+# /proc/<pid>/status. A process that dropped its effective uid but kept the
+# account's saved uid can take it back, so it still counts. Prints the pids
+# and returns 0, returns 1 when there is none, and returns 2 when the process
+# table cannot be judged: no status could be read, or one had no Uid line.
+# 2 is never "none". This replaces pgrep, whose failure (missing, or exiting
+# 2 or 3) looked exactly like "no process" and let retirement go ahead.
+host_account_processes() {
+    local name=$1 entry uid status pid line found="" seen=0
+    entry=$(getent passwd "$name") || return 1
+    uid=$(cut -d: -f3 <<<"$entry")
+    [[ "$uid" =~ ^[0-9]+$ ]] || return 2
+    for status in "$PROC_ROOT"/[0-9]*/status; do
+        pid=${status%/status}; pid=${pid##*/}
+        [[ "$pid" =~ ^[0-9]+$ ]] || continue
+        # A process may exit between the glob and the read; that one is gone,
+        # not unknown. One that is still there and cannot be read is unknown.
+        if ! line=$(grep -m1 '^Uid:' "$status" 2>/dev/null); then
+            [ -e "$status" ] || continue
+            return 2
+        fi
+        seen=$((seen + 1))
+        if awk -v u="$uid" '{ for (i = 2; i <= 5; i++) if ($i == u) found = 1 } END { exit !found }' <<<"$line"; then
+            found+="$pid"$'\n'
+        fi
+    done
+    [ "$seen" -gt 0 ] || return 2
+    [ -n "$found" ] || return 1
+    printf '%s' "$found"
+    return 0
 }
 
 # Python run by root on files the runner account can write. It opens without
