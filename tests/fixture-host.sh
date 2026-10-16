@@ -171,6 +171,12 @@ new_host() {
 # --- fixture host: accounts and ownership are recorded, not made ---
 host_preflight() { step "preflight"; ok "fixture host"; }
 host_ensure_user() {
+    # A person's account of that name: the real function refuses it (its
+    # cases are in the host drill); what matters here is what apply does next.
+    if [ -e "$H/fake/human-\$1" ]; then
+        fail "account \$1 exists and is not a RunnerSlice system account; refusing to adopt it"
+        return 1
+    fi
     if [ -e "$H/fake/user-\$1" ]; then ok "fixture user \$1"; return 0; fi
     change "fixture user \$1"
     [ "\$CHECK_ONLY" -eq 0 ] && : > "$H/fake/user-\$1"
