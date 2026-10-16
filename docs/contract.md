@@ -151,7 +151,8 @@ is. It remains a candidate for its own project (decision 0004).
 
 Only what has been verified is listed, in [compatibility.md](compatibility.md).
 Preflight refuses anything other than Ubuntu with systemd 249 or later and
-cgroup v2.
+cgroup v2. It accepts more than is supported: any systemd other than 255
+passes with a warning that it is unverified.
 
 ## Security position
 
