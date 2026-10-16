@@ -129,8 +129,9 @@ observed on a real host before it counts.
   that way, including a parser error such as deep nesting, is "cannot tell"
   (exit 2), never a pass.
 - A registered runner's directory is never unpacked into again. A first
-  unpack goes into a directory root has just created, closed to the runner
-  account until it is handed over.
+  unpack goes into a directory root has just created, mode 0700 for the whole
+  unpack (`tar --no-overwrite-dir` keeps the archive's own mode off it), and
+  handed to the runner account only after.
 - `.runner` holds the runner's name, repository and work folder, and no
   credential. RunnerSlice reads it to refuse a runner registered as something
   else.
