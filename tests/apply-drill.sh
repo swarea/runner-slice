@@ -232,6 +232,31 @@ register app
 apply --profile app
 expect_rc 'the profile converges once the names are free' 0
 
+# A person's account with the runner's name: nothing is created for it --
+# no runtime root, no download, no unit.
+new_host humanaccount
+only app
+: > "$H/fake/human-runner-app"
+before=$(snapshot)
+apply --profile app
+expect_rc "a person's account of the runner's name stops the profile" 1
+expect_out 'it is named' 'account runner-app exists and is not a RunnerSlice system account'
+expect_same 'nothing was created, downloaded or installed for it' "$before"
+
+# Root's temporary files never go where an inherited TMPDIR points.
+new_host tmpdir
+only app
+MT="$T/mktemp-bin"; mkdir -p "$MT" "$T/shared-tmp"; chmod 1777 "$T/shared-tmp"
+# shellcheck disable=SC2016 # the fake mktemp expands these when it runs
+printf '#!/usr/bin/env bash\necho "${TMPDIR-unset}" >> "%s"\nexec /usr/bin/mktemp "$@"\n' "$T/mktemp.log" > "$MT/mktemp"
+chmod +x "$MT/mktemp"
+RC=0
+OUT=$(env PATH="$MT:$BIN:$PATH" TMPDIR="$T/shared-tmp" FAKE="$H/fake" FAKE_CG="$H/cg" FAKE_PROC="$H/proc" \
+          FAKE_ARCHIVE="$ARCHIVE" bash "$H/fabric/fabric-apply.sh" --config "$H/config" --profile app 2>&1) || RC=$?
+expect_rc 'apply runs with an inherited TMPDIR' 1
+holds 'and makes its temporary directory without it' grep -qx unset "$T/mktemp.log"
+refutes 'never under the inherited one' grep -q "$T/shared-tmp" "$T/mktemp.log"
+
 # A registration that names another repository, runner or work folder is a
 # runner the profile does not describe; it is not started.
 new_host misregistered
