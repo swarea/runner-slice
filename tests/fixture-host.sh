@@ -25,6 +25,7 @@ start() {
     listed active "$1" || echo "$1" >> "$FAKE/active"
     mkdir -p "$FAKE_CG/ci.slice/$1" "$FAKE_PROC/4000"
     printf '%s\0' /runner/bin/Runner.Listener run > "$FAKE_PROC/4000/cmdline"
+    printf 'Name:\tRunner.Listener\nUid:\t0\t0\t0\t0\n' > "$FAKE_PROC/4000/status"
     echo 4000 > "$FAKE_CG/ci.slice/$1/cgroup.procs"
 }
 stop() { drop active "$1"; rm -rf "${FAKE_CG:?}/ci.slice/$1"; }
@@ -94,10 +95,12 @@ fi
 exec /usr/bin/id "$@"
 EOF
 
-# Processes of an account, from a file: one PID per line.
+# Processes are read from the fixture's /proc, never from pgrep. This pgrep
+# fails the way a broken one does -- nothing printed, exit 3 -- so a script
+# that still trusted it would read "no process" and go ahead.
 cat > "$BIN/pgrep" <<'EOF'
 #!/usr/bin/env bash
-[ "$1" = -u ] && [ -s "$FAKE/procs-$2" ] && cat "$FAKE/procs-$2"
+exit 3
 EOF
 
 cat > "$BIN/runuser" <<'EOF'
@@ -129,7 +132,8 @@ tar -czf "$ARCHIVE" -C "$PAYLOAD" .
 # new_host NAME   builds $T/NAME and points H at it
 new_host() {
     H="$T/$1"
-    mkdir -p "$H/root" "$H/cg" "$H/proc" "$H/fake"
+    mkdir -p "$H/root" "$H/cg" "$H/proc/1" "$H/fake"
+    printf 'Name:\tsystemd\nUid:\t0\t0\t0\t0\n' > "$H/proc/1/status"
     cp -a "$ROOT/fabric" "$H/fabric"
     cp -a "$ROOT/examples/basic/." "$H/config/"
     : > "$H/fake/enabled"; : > "$H/fake/active"; : > "$H/fake/systemctl.log"
@@ -163,7 +167,12 @@ host_ensure_user() {
 host_remove_user() {
     if [ -e "$H/fake/user-\$1" ]; then
         change "remove fixture user \$1"
-        [ "\$CHECK_ONLY" -eq 0 ] && rm -f "$H/fake/user-\$1"
+        [ "\$CHECK_ONLY" -eq 0 ] || return 0
+        if [ -e "$H/fake/userdel-fails" ]; then
+            fail "userdel could not remove \$1 (exit 8); the account is still there"
+            return 1
+        fi
+        rm -f "$H/fake/user-\$1"
     else
         ok "fixture user \$1 is absent"
     fi

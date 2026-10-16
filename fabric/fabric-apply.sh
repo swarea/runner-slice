@@ -353,28 +353,58 @@ if [ "$MODE" = retire ]; then
         fi
         # A job's leftover process (KillMode=process lets one outlive the
         # service) would keep files open and make the account removal fail.
-        if leftover=$(pgrep -u "$RUNNER_USER" 2>/dev/null | paste -sd' ' -) && [ -n "$leftover" ]; then
-            fail "processes of $RUNNER_USER are still running ($leftover)"
-            note "  stop them, then run --retire $PROFILE_ID again"
-            removable=0
-        fi
+        # Every uid the kernel keeps is compared, and a process table that
+        # cannot be read is a refusal: "could not look" is never "none".
+        prc=0
+        leftover=$(host_account_processes "$RUNNER_USER") || prc=$?
+        case "$prc" in
+            0)  fail "processes of $RUNNER_USER are still running ($(paste -sd' ' - <<<"$leftover"))"
+                note "  stop them, then run --retire $PROFILE_ID again"
+                removable=0 ;;
+            1)  ok "no process runs as $RUNNER_USER" ;;
+            *)  fail "cannot tell whether any process runs as $RUNNER_USER"
+                removable=0 ;;
+        esac
         if [ "$removable" -ne 1 ]; then
             note "nothing was removed"
             host_report_apply
         fi
 
-        if host_remove_file "$UNIT_DIR/$SERVICE" "retired runner" && [ "$CHECK_ONLY" -eq 0 ]; then
-            systemctl daemon-reload
+        # Removal is not atomic, so it is ordered to leave a retryable state
+        # at every step. The account goes first: while it exists, the unit
+        # and the marked root still identify it as this runner's, and a
+        # second run removes the rest exactly as the first would have. The
+        # unit goes last, so a profile half-way through still names it.
+        if ! host_remove_user "$RUNNER_USER"; then
+            note "nothing else was removed; $INSTALL_ROOT and $SERVICE are left as they were"
+            note "fix the cause above, then run --retire $PROFILE_ID again"
+            host_report_apply
         fi
+        # The marker is removed last: a removal that stops part-way must leave
+        # the proof that the rest is RunnerSlice's, or no retry could finish.
         if [ -e "$FS_INSTALL_ROOT" ]; then
             change "remove $INSTALL_ROOT"
-            [ "$CHECK_ONLY" -eq 0 ] && rm -rf --one-file-system -- "$FS_INSTALL_ROOT"
+            if [ "$CHECK_ONLY" -eq 0 ] &&
+               ! { find "$FS_INSTALL_ROOT" -mindepth 1 -maxdepth 1 ! -name .runner-slice-root \
+                       -exec rm -rf --one-file-system -- {} + &&
+                   rm -f -- "$FS_INSTALL_ROOT/.runner-slice-root" &&
+                   rmdir -- "$FS_INSTALL_ROOT"; }; then
+                fail "could not remove all of $INSTALL_ROOT; $SERVICE is left in place"
+                note "fix the cause above, then run --retire $PROFILE_ID again"
+                host_report_apply
+            fi
         else
             ok "$INSTALL_ROOT is absent"
         fi
-        host_remove_user "$RUNNER_USER"
-        note "retired. Now delete profiles/$PROFILE_ID.conf and run --all with the other"
-        note "runners idle: their units drop the mask for $INSTALL_ROOT."
+        if host_remove_file "$UNIT_DIR/$SERVICE" "retired runner" && [ "$CHECK_ONLY" -eq 0 ]; then
+            systemctl daemon-reload
+        fi
+        if [ "$check_failed" -eq 1 ]; then
+            note "the runner is removed, but what is reported above was left behind"
+        else
+            note "retired. Now delete profiles/$PROFILE_ID.conf and run --all with the other"
+            note "runners idle: their units drop the mask for $INSTALL_ROOT."
+        fi
     fi
 
     host_report_apply

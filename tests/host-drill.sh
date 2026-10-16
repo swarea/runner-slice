@@ -400,19 +400,34 @@ mkdir -p "$ACC/root/etc"
 echo 'UID_MIN                  1000' > "$ACC/root/etc/login.defs"
 cat > "$T/bin/getent" <<'EOF'
 #!/usr/bin/env bash
+if [ "$#" -eq 1 ]; then cat "$FAKE_ACCOUNTS.$1"; exit; fi
 grep "^$2:" "$FAKE_ACCOUNTS.$1" 2>/dev/null
 EOF
-for c in groupadd useradd userdel groupdel; do
+for c in groupadd useradd groupdel; do
     # shellcheck disable=SC2016 # the fake expands these when it runs
     printf '#!/usr/bin/env bash\necho "%s $*" >> "$FAKE_ACCOUNTS.log"\n' "$c" > "$T/bin/$c"
 done
+# userdel removes the passwd entry, as the real one does, and the group only
+# as USERGROUPS_ENAB yes would; $FAKE_ACCOUNTS.userdel can make it fail
+# before (8) or after (12) the account is gone, or keep the group (keep).
+cat > "$T/bin/userdel" <<'EOF'
+#!/usr/bin/env bash
+echo "userdel $*" >> "$FAKE_ACCOUNTS.log"
+mode=$(cat "$FAKE_ACCOUNTS.userdel" 2>/dev/null)
+[ "$mode" = 8 ] && exit 8
+name=${*: -1}
+grep -v "^$name:" "$FAKE_ACCOUNTS.passwd" > "$FAKE_ACCOUNTS.new"; mv "$FAKE_ACCOUNTS.new" "$FAKE_ACCOUNTS.passwd"
+[ "$mode" = keep ] || { grep -v "^$name:" "$FAKE_ACCOUNTS.group" > "$FAKE_ACCOUNTS.new"; mv "$FAKE_ACCOUNTS.new" "$FAKE_ACCOUNTS.group"; }
+[ "$mode" = 12 ] && exit 12
+exit 0
+EOF
 chmod +x "$T/bin/"*
 export FAKE_ACCOUNTS="$ACC/db"
 
 account() { # NAME UID HOME
     echo "$1:x:$2:$2::$3:/bin/bash" > "$FAKE_ACCOUNTS.passwd"
     echo "$1:x:$2:" > "$FAKE_ACCOUNTS.group"
-    : > "$FAKE_ACCOUNTS.log"
+    : > "$FAKE_ACCOUNTS.log"; rm -f "$FAKE_ACCOUNTS.userdel"
 }
 acct() { # FUNCTION NAME   prints rc:first FAIL line
     local out rc=0
@@ -432,7 +447,7 @@ result "it is not adopted" \
     "$(acct host_ensure_user runner-app)"
 result "and nothing was created for it" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
 result "it is not removed either" \
-    "0:account runner-app is not a RunnerSlice system account; not removing it" \
+    "1:account runner-app is not a RunnerSlice system account; not removing it" \
     "$(acct host_remove_user runner-app)"
 result "and nothing was deleted" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
 
@@ -465,11 +480,48 @@ result "a home of that name without the account is not adopted" \
 rmdir "$ACC/root/home/runner-new"
 
 account runner-app 998 /home/runner-app
-# shellcheck disable=SC2016 # the fake runuser expands these when it runs
-printf '#!/usr/bin/env bash\necho "userdel $*" >> "$FAKE_ACCOUNTS.log"\nexit 8\n' > "$T/bin/userdel"
-result "a failing userdel is a failure, not hidden" \
-    "0:userdel could not remove runner-app; nothing else was changed for it" \
+echo 8 > "$FAKE_ACCOUNTS.userdel"
+result "a userdel that leaves the account is a failure the caller stops on" \
+    "1:userdel could not remove runner-app (exit 8); the account is still there" \
     "$(acct host_remove_user runner-app)"
+
+# userdel exits 12 when the account is gone but the home is not. The outcome
+# is read back, not inferred from the exit code.
+account runner-app 998 /home/runner-app
+echo 12 > "$FAKE_ACCOUNTS.userdel"; mkdir -p "$ACC/root/home/runner-app"
+result "a home userdel left is reported, not hidden and not deleted" \
+    "0:/home/runner-app is still there without its account; it is not removed automatically" \
+    "$(acct host_remove_user runner-app)"
+result "and the home is still there" yes "$([ -d "$ACC/root/home/runner-app" ] && echo yes || echo no)"
+rmdir "$ACC/root/home/runner-app"
+
+# USERGROUPS_ENAB no: userdel keeps the account's group, which would then
+# block reinstalling the runner forever.
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"
+result "the account's own group left by userdel is removed" "0:" "$(acct host_remove_user runner-app)"
+result "with groupdel, by name" "userdel --remove runner-app|groupdel runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"; echo "runner-app:x:998:alice" > "$FAKE_ACCOUNTS.group"
+acct host_remove_user runner-app >/dev/null
+result "a group with members is left" "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"; echo "svc:x:997:998::/srv/svc:/bin/false" >> "$FAKE_ACCOUNTS.passwd"
+acct host_remove_user runner-app >/dev/null
+result "a group another account uses as its primary group is left" "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"; echo "runner-app:x:1234:" > "$FAKE_ACCOUNTS.group"
+acct host_remove_user runner-app >/dev/null
+result "a group of that name with another gid is left" "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+
+account runner-app 998 /home/runner-app; : > "$FAKE_ACCOUNTS.passwd"
+result "a group found without its account is reported, never removed" \
+    "0:group runner-app exists without its account; RunnerSlice can no longer tell whether it was this runner's" \
+    "$(acct host_remove_user runner-app)"
+result "and nothing was deleted" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
 rm -f "$T/bin/getent" "$T/bin/groupadd" "$T/bin/useradd" "$T/bin/userdel" "$T/bin/groupdel"
 
 echo
@@ -490,6 +542,40 @@ out=$(PATH="$T/acc-bin:$PATH" host_expect_no_access nobody "$T/acc-file")
 result "and the boundary check fails rather than passes" yes \
     "$(grep -q 'FAIL    cannot test whether nobody can read' <<<"$out" && echo yes || echo no)"
 check_failed=0
+
+echo
+echo '== processes of an account, by every uid the kernel keeps =='
+
+# host_account_processes reads /proc/<pid>/status. A process belongs to the
+# account if its real, effective, saved or filesystem uid is the account's.
+PR="$T/procscan"
+proc_status() { mkdir -p "$PR/$1"; printf 'Name:\t%s\nUid:\t%s\n' "$2" "$3" > "$PR/$1/status"; }
+reset_procs() { rm -rf "$PR"; mkdir -p "$PR"; proc_status 1 systemd '0	0	0	0'; }
+procs() { local out rc=0; out=$(PROC_ROOT="$PR"; host_account_processes "$1") || rc=$?; printf '%s:%s' "$rc" "$(paste -sd' ' - <<<"$out")"; }
+cat > "$T/bin/getent" <<'EOF'
+#!/usr/bin/env bash
+[ "$1" = passwd ] && [ "$2" = rs-probe ] && echo "rs-probe:x:990:990::/home/rs-probe:/bin/bash"
+[ "$1" = passwd ] && [ "$2" = rs-probe ] || exit 2
+EOF
+chmod +x "$T/bin/getent"
+
+reset_procs
+result "no process of the account" "1:" "$(procs rs-probe)"
+proc_status 200 job '990	990	990	990'
+result "a process running as the account is found" "0:200" "$(procs rs-probe)"
+reset_procs; proc_status 201 setuid '990	0	990	0'
+result "a process with only its real uid is found" "0:201" "$(procs rs-probe)"
+reset_procs; proc_status 202 dropped '0	0	990	0'
+result "a process with only its saved uid is found" "0:202" "$(procs rs-probe)"
+reset_procs; proc_status 203 other '991	991	991	991'
+result "another account's process is not counted" "1:" "$(procs rs-probe)"
+rm -rf "$PR"; mkdir -p "$PR"
+result "a process table with nothing readable cannot be judged" "2:" "$(procs rs-probe)"
+reset_procs; mkdir -p "$PR/204"; printf 'Name:\tbroken\n' > "$PR/204/status"
+result "a status without a Uid line cannot be judged" "2:" "$(procs rs-probe)"
+reset_procs
+result "an account that does not exist has no processes to find" "1:" "$(procs rs-nobody)"
+rm -f "$T/bin/getent"
 
 echo
 echo '== mode comparison =='
