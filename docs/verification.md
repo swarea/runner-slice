@@ -31,6 +31,7 @@ reported as SKIPPED or BLOCKED, never as passed.
 | Synthetic | `tests/*-drill.sh`, which CI runs | The real scripts, unmodified, against a fixture host. |
 | Integration | a disposable VM, by hand | Real systemd, cgroups, accounts, registration and GitHub jobs: the lifecycle acceptance below. |
 | Dogfood | a separate private repository, on that VM | RunnerSlice's own drills, run by runners RunnerSlice manages. |
+| Public CI | the `check` workflow, on GitHub-hosted `ubuntu-24.04` | `tests/run.sh` on every push to `main` and every pull request. It never runs on a self-hosted runner. |
 
 ### Static and synthetic
 
@@ -152,9 +153,9 @@ Creating either environment needs owner approval, and so does any cost.
 
 ### Dogfood
 
-The integration VM's runners are registered to a separate private repository,
-proposed as `swarea/runner-slice-dogfood`. They are not registered to this
-repository.
+The integration VM's runners were registered to a separate private
+repository, `swarea/runner-slice-dogfood`, never to this one. They were
+retired when the acceptance ended.
 
 - **Its workflow** checks out an owner-approved commit of RunnerSlice by SHA,
   and runs `tests/run.sh` on the VM's runners.

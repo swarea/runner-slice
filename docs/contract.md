@@ -181,21 +181,23 @@ run against one recorded commit.
 |---|---|
 | Foundation | contract agreed; core extracted; drills pass here (SYNTHETICALLY TESTED) |
 | Alpha | preflight, converge, register, status and conformance ported; one runner REAL CLIENT VERIFIED on the test VM |
-| Beta | pools, busy guard, idempotent re-apply and retire RUNTIME VERIFIED on the test VM; security and docs reviewed |
+| Beta | pools, busy guard, idempotent re-apply and retire RUNTIME VERIFIED on the test VM; security and docs reviewed; `status` REAL CLIENT VERIFIED with an authenticated `gh`; one x86_64 host RUNTIME VERIFIED; a runner self-update observed |
 | 1.0 | fresh install from the docs alone; dogfood and lifecycle acceptance complete; REBOOT VERIFIED; release archive with checksums |
 
 The version follows the evidence. No stage is skipped to reach a number.
 
 ## Open decisions (owner)
 
-Decided on 2026-10-15: the name (decision 0003), the MIT licence, and a
-private `swarea/runner-slice` repository with rebase-only merges. Still open,
-each a separate approval:
+Decided:
 
-- **Public visibility**, and the first release.
-- **The verification VMs:** an ARM64 VM on the maintainer's laptop, and a
-  short-lived x86_64 cloud VM with a cost cap.
-- **The private dogfood repository** (proposed: `swarea/runner-slice-dogfood`),
-  and the registration-token steps.
-- **Hosted CI minutes** for the private repository, which are currently
-  blocked by billing.
+- on 2026-10-15: the name (decision 0003), the MIT licence, and rebase-only
+  merges;
+- the ARM64 verification VM and the private dogfood repository
+  `swarea/runner-slice-dogfood`, used for the acceptance of 2026-10-15/16;
+- on 2026-10-16: public visibility. Hosted CI for a public repository needs
+  no paid minutes.
+
+Still open, each a separate approval:
+
+- **the first release and tag**;
+- **an x86_64 verification host**, and its cost.

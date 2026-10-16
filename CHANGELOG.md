@@ -4,10 +4,13 @@ Entries are written for someone upgrading: what they have to do, and what will
 behave differently. Versions follow the evidence, as set out in
 [docs/contract.md](docs/contract.md), not a calendar.
 
-## Unreleased
+## Unreleased (public alpha)
 
-There is no release yet. Everything below is SYNTHETICALLY TESTED only. None
-of it has run on a real host.
+There is no release or tag yet. Everything below is SYNTHETICALLY TESTED by
+the drills, which run on GitHub-hosted CI for every change. The lifecycle has
+also been RUNTIME VERIFIED and REBOOT VERIFIED on one Ubuntu 24.04 aarch64 host
+with systemd 255 ([docs/acceptance/2026-10-arm64.md](docs/acceptance/2026-10-arm64.md)).
+Nothing has run on x86_64.
 
 - **Declarative inventory:**
   - one policy file, one release seed and one profile per runner;
@@ -43,3 +46,25 @@ of it has run on a real host.
   - check fails when an access test cannot run;
   - masks are recognised by the mount's root only;
   - `TMPDIR` is ignored, and paths are resolved physically.
+- **Fixes from the real ARM64 host:**
+  - the release archive carries 0644/0755 modes, so preflight accepts the
+    unpacked tree;
+  - `check` reads `RestrictNamespaces=yes` and `no` as systemd prints them;
+  - the printed registration never uses `--replace`, and runs `config.sh` in
+    its own directory;
+  - `config.sh remove` is printed without `--unattended`, which it rejects.
+- **Fixes from the post-acceptance review (#18):**
+  - leftover processes are found by every uid in `/proc`, and an unreadable
+    process table refuses retirement;
+  - retirement removes the account, then the runtime root with its marker
+    last, then the unit, so a run that fails part-way can be finished by
+    another;
+  - only the account's own unused group is removed, and a leftover home or
+    group is reported by name;
+  - runner-written files are read without following any symlink below the
+    runner directory; any parse failure is "cannot tell";
+  - the printed token commands run in a subshell;
+  - the runner directory stays 0700 for the whole unpack.
+- **Behaviour an operator will notice:**
+  - preflight warns on any systemd other than 255;
+  - `retire` exits 1 when it leaves something behind, and names it.

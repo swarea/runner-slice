@@ -8,12 +8,10 @@ report a problem and what counts as one.
 ## Reporting a vulnerability
 
 Report it privately, through GitHub's private vulnerability reporting for this
-repository (**Security → Report a vulnerability**). Never use a public issue.
-Include the RunnerSlice commit or version, the host's distribution and systemd
-version, and the smallest inventory that shows the problem.
-
-While the repository is private, that form is not available. Report to the
-maintainer directly through GitHub.
+repository: [Security → Report a vulnerability](https://github.com/swarea/runner-slice/security/advisories/new).
+Never use a public issue or pull request. Include the RunnerSlice commit or
+version, the host's distribution and systemd version, and the smallest
+inventory that shows the problem.
 
 Expect a first reply within a week. There is no bounty and no formal SLA. A fix
 is released together with a note that says what was affected and what an
@@ -21,8 +19,8 @@ operator has to do.
 
 ## Supported versions
 
-There is no release yet. Once there is, only the latest release receives
-fixes.
+There is no release yet. Until there is, fixes land on `main` only. Once
+there is, only the latest release receives fixes.
 
 ## In scope
 
