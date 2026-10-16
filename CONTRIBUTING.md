@@ -20,18 +20,21 @@ afterwards:
 - head branches deleted automatically after merge;
 - auto-merge disabled.
 
-**Not yet enforced.** While the repository is private on the organisation's
-Free plan, GitHub offers no branch protection and no rulesets. So the following
-are procedure, not settings:
+**Enforced on `main`** by a repository ruleset, since the repository became
+public on 2026-10-16:
 
-- the `gate` check must pass before a merge;
-- no force push to `main`;
-- no deletion of `main`.
+- changes arrive through a pull request, merged by rebase only;
+- the `gate` check must pass;
+- linear history;
+- no force push, and no deletion.
 
-When the repository becomes public they become settings: `gate` required,
-linear history required, force pushes and deletion refused. Administrators
-will not be included, so that an outage of GitHub Actions cannot block a
-release; the owner can override.
+Repository administrators can bypass the ruleset only when merging a pull
+request, never with a direct push. An outage of GitHub Actions therefore
+cannot block a fix, while force pushes and deletion stay refused for
+everyone.
+
+**Pull requests from forks** need a maintainer's approval before their
+workflows run.
 
 **No required review.** This is a one-person repository, so a required review
 would stop every merge. Every merge is an explicit owner decision. A green
@@ -95,7 +98,9 @@ drill case fails.
 The `check` workflow runs on GitHub-hosted runners only, with a read-only
 token. Code from a pull request never runs on a host RunnerSlice manages.
 Dogfood runs, where RunnerSlice's own runners test RunnerSlice, happen in a
-separate private repository on commits the owner has approved. See
+separate private repository on commits the owner has approved. No
+self-hosted runner is registered to this repository, so a pull request here
+cannot reach one. See
 [docs/verification.md](docs/verification.md).
 
 ## Security reports

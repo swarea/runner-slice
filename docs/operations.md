@@ -1,6 +1,6 @@
 # Operations
 
-> **Status: pre-release.** The lifecycle below was run end to end on one real
+> **Status: public alpha.** The lifecycle below was run end to end on one real
 > Ubuntu 24.04 aarch64 host with two GitHub runners
 > ([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)). Unknown job state
 > and misregistration are exercised by drills only.

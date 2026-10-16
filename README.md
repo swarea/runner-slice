@@ -11,20 +11,25 @@ the running host, that the boundary and limits are what you declared.
 It is Bash and systemd. It has no daemon, no database, no Kubernetes and no
 web server.
 
-> **Status: pre-release (0.1.0-dev).**
+> **Status: public alpha (0.1.0-dev). There is no release or tag yet.**
 >
-> - Every behaviour described here is exercised by drills against a fixture
->   host. That is SYNTHETICALLY TESTED.
-> - The full lifecycle has also run on **one real host**: an Ubuntu 24.04
->   aarch64 VM with two real GitHub runners. It went from install to
->   registration, jobs, pool, busy guard, reboot, deregistration and
->   retirement ([docs/acceptance/2026-10-arm64.md](docs/acceptance/2026-10-arm64.md)).
-> - RunnerSlice's own drills ran there as GitHub Actions jobs, on runners
+> - **Every push and pull request** runs shellcheck and every drill on
+>   GitHub-hosted runners (the `check` workflow). The drills exercise each
+>   behaviour against a fixture host. That is SYNTHETICALLY TESTED.
+> - **The full lifecycle has run on one real host:** an Ubuntu 24.04 aarch64
+>   VM with systemd 255 and two real GitHub runners. It went from install to
+>   registration, jobs, pool, busy guard, the slice limits, reboot,
+>   deregistration, retirement and recovery from a retirement that failed
+>   part-way ([docs/acceptance/2026-10-arm64.md](docs/acceptance/2026-10-arm64.md)).
+> - **RunnerSlice's own drills ran there as GitHub Actions jobs**, on runners
 >   RunnerSlice installed and managed.
-> - **Not verified:** x86_64, other distributions, and GitHub-hosted CI for
->   this repository. GitHub-hosted CI is currently blocked by the
->   organisation's billing.
-> - No release exists. Use a machine you can afford to rebuild.
+> - **Not verified:**
+>   - x86_64, and any systemd other than 255;
+>   - a runner's self-update;
+>   - `runner-slice status` with an authenticated `gh`;
+>   - an unknown job state and a misregistration on a real host.
+>
+> Use a machine you can afford to rebuild.
 
 ## Why
 
@@ -75,6 +80,18 @@ RunnerSlice's answer:
 
 The full security model is in [docs/threat-model.md](docs/threat-model.md).
 
+## Compared with other tools
+
+| | Isolation | Bounds the rest of the host | Persistent per-repository runners |
+|---|---|---|---|
+| `actions/runner`'s `svc.sh` | none beyond the account you choose | no | yes, one unit each, no limits |
+| Actions Runner Controller, GARM | pods or VMs, ephemeral | not on a shared host | no: ephemeral by design |
+| **RunnerSlice** | a Unix account and systemd sandbox per runner | yes: one slice with declared limits, plus masks | yes |
+
+Choose ephemeral runners when untrusted code runs. Choose RunnerSlice when
+you trust the repositories, want to reuse a server you already operate, and
+need to bound and verify what CI can take from it.
+
 ## How it works
 
 ```text
@@ -104,6 +121,14 @@ preflight accepts. What is supported is narrower: **verified so far, Ubuntu
 24.04 on aarch64 (systemd 255), on one VM.** Preflight warns on any systemd
 other than 255. [docs/compatibility.md](docs/compatibility.md) is the only list of
 what has been verified.
+
+## Getting started
+
+1. Read [Installation](docs/installation.md): requirements, and how to
+   install from a checkout until the first release exists.
+2. Write the inventory ([Configuration](docs/configuration.md)), then follow
+   [Operations](docs/operations.md) from `plan` to the first registered runner.
+3. Run `sudo runner-slice check` after every change and every reboot.
 
 ## Documentation
 

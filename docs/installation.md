@@ -1,7 +1,8 @@
 # Installation
 
-> **Status: pre-release.** These steps were carried out on one real host: an
-> Ubuntu 24.04 aarch64 VM ([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)).
+> **Status: public alpha, no release yet.** These steps were carried out on
+> one real host: an Ubuntu 24.04 aarch64 VM with systemd 255
+> ([acceptance/2026-10-arm64.md](acceptance/2026-10-arm64.md)).
 > No x86_64 host has been verified. Use a machine you can afford to rebuild.
 
 ## Requirements
