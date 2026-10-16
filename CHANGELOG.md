@@ -64,7 +64,10 @@ Nothing has run on x86_64.
   - runner-written files are read without following any symlink below the
     runner directory; any parse failure is "cannot tell";
   - the printed token commands run in a subshell;
-  - the runner directory stays 0700 for the whole unpack.
+  - the runner directory stays 0700 for the whole unpack;
+  - retirement removes nothing while a filesystem is mounted in the runtime
+    root, or while the mount table or an account lookup cannot be read;
+  - a group is kept when accounts also come from a directory service.
 - **Behaviour an operator will notice:**
   - preflight warns on any systemd other than 255;
   - `retire` exits 1 when it leaves something behind, and names it.

@@ -122,8 +122,16 @@ never registered. That run covered:
 - a symlinked `bin/`;
 - the unpack mode.
 
-The results are in [the acceptance record](acceptance/2026-10-arm64.md). An
-unreadable `/proc`, and malformed runner files, remain SYNTHETICALLY TESTED.
+The refusal to retire a root with a filesystem mounted in it was verified
+the same way, at 90f7ec8. The results are in
+[the acceptance record](acceptance/2026-10-arm64.md). An unreadable `/proc`,
+an unreadable mount table, directory-service accounts and malformed runner
+files remain SYNTHETICALLY TESTED.
+
+Public CI first ran on 2026-10-16, once the repository became public.
+`main` at 1b5fa57 (tree 84a0cec) passed in run 38925260191, on a
+GitHub-hosted `ubuntu-24.04` runner: shellcheck on 20 scripts, then 545 drill
+cases, 0 failed.
 
 Each run records:
 
