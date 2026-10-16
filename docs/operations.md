@@ -54,17 +54,21 @@ Every `apply` line is one of:
    never handles it:
 
    ```sh
-   export ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST /repos/<owner>/<repo>/actions/runners/registration-token --jq .token)"
-   sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app -H \
-       env -C /var/lib/ci-app/runner HOME=/home/runner-app ./config.sh \
-       --url https://github.com/<owner>/<repo> \
-       --name <runner-name> --labels <labels> \
-       --work /var/lib/ci-app/work --unattended
-   unset ACTIONS_RUNNER_INPUT_TOKEN
+   (
+     ACTIONS_RUNNER_INPUT_TOKEN="$(gh api -X POST /repos/<owner>/<repo>/actions/runners/registration-token --jq .token)" || exit
+     export ACTIONS_RUNNER_INPUT_TOKEN
+     sudo --preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app -H \
+         env -C /var/lib/ci-app/runner HOME=/home/runner-app ./config.sh \
+         --url https://github.com/<owner>/<repo> \
+         --name <runner-name> --labels <labels> \
+         --work /var/lib/ci-app/work --unattended
+   )
    sudo chmod 600 /var/lib/ci-app/runner/.runner /var/lib/ci-app/runner/.credentials /var/lib/ci-app/runner/.credentials_rsaparams
    ```
 
    Copy the exact command `apply` printed. It has your names and labels in it.
+   The parentheses matter: the token stays in that subshell and is gone when
+   it ends, whatever `config.sh` does.
 
    `env -C` runs `config.sh` in its own directory. `config.sh` checks its
    native libraries with `./bin/...` paths before it changes directory, so run
