@@ -52,6 +52,36 @@ expect_no 'a first registration never replaces a runner of the same name' '--una
 # directory; run from elsewhere, that check silently checks nothing.
 expect_out 'registration runs config.sh in the runner directory' 'env -C /var/lib/ci-app/runner HOME=/home/runner-app ./config.sh'
 expect_no 'no token is requested by the tool itself' 'TOKEN=ghs'
+
+# The printed block is run, with gh and sudo standing in: the token reaches
+# config.sh only through sudo's preserved environment, does not outlive the
+# block in the operator's shell, and a gh that fails never reaches config.sh.
+TOK="$T/tokbin"; mkdir -p "$TOK"
+cat > "$TOK/gh" <<'EOF'
+#!/usr/bin/env bash
+[ -e "$TOK_STATE/gh-fails" ] && { echo "gh: HTTP 401" >&2; exit 1; }
+echo fixture-token-value
+EOF
+cat > "$TOK/sudo" <<'EOF'
+#!/usr/bin/env bash
+printf 'token=%s args=%s\n' "${ACTIONS_RUNNER_INPUT_TOKEN-unset}" "$*" >> "$TOK_STATE/sudo.log"
+EOF
+chmod +x "$TOK/gh" "$TOK/sudo"
+printed_block() { awk '/^ +\($/ { on = 1 } on { print } /^ +\)$/ { on = 0 }' <<<"$OUT"; }
+run_block() { # FILE   sources the block, then reports what the shell still holds
+    TOK_STATE="$T" PATH="$TOK:$PATH" bash -c '. "$1"; echo "after=${ACTIONS_RUNNER_INPUT_TOKEN-unset}"' _ "$1" 2>/dev/null
+}
+printed_block > "$T/register.sh"
+holds 'the registration is printed as one block' [ -s "$T/register.sh" ]
+refutes 'and nothing in it replaces a runner of the same name' grep -q -- '--replace' "$T/register.sh"
+rm -f "$T/sudo.log" "$T/gh-fails"
+result_after=$(run_block "$T/register.sh")
+holds 'config.sh receives the token through sudo' grep -q '^token=fixture-token-value args=--preserve-env=ACTIONS_RUNNER_INPUT_TOKEN -u runner-app' "$T/sudo.log"
+holds 'and the token is gone from the shell afterwards' [ "$result_after" = after=unset ]
+rm -f "$T/sudo.log"; : > "$T/gh-fails"
+run_block "$T/register.sh" >/dev/null
+refutes 'a gh that fails never reaches config.sh' [ -e "$T/sudo.log" ]
+rm -f "$T/gh-fails"
 holds 'the verified release is unpacked' [ -x "$H/root/var/lib/ci-app/runner/config.sh" ]
 expect_lines 'the archive was downloaded once' "$H/fake/curl.log" 1
 expect_lines 'the declared package was installed' "$H/fake/apt.log" 1
@@ -320,6 +350,13 @@ expect_out 'deregistration runs config.sh in the runner directory' 'env -C /var/
 # config.sh remove accepts --token, --pat and --local only (actions/runner
 # v2.338.0); --unattended is a configure flag and is reported as unrecognised.
 expect_no 'deregistration passes no flag remove does not accept' 'config.sh remove --unattended'
+printed_block > "$T/deregister.sh"
+rm -f "$T/sudo.log"
+result_after=$(run_block "$T/deregister.sh")
+holds 'deregistration hands config.sh remove the token through sudo' \
+    grep -q '^token=fixture-token-value args=.* env -C /var/lib/ci-web-2/runner HOME=/home/runner-web-2 ./config.sh remove$' "$T/sudo.log"
+holds 'and leaves no token in the shell' [ "$result_after" = after=unset ]
+rm -f "$T/sudo.log"
 holds 'it is stopped and disabled first' grep -q '^disable ci-web-2-runner.service' "$H/fake/systemctl.log"
 holds 'its registration is left for the person' [ -e "$H/root/var/lib/ci-web-2/runner/.runner" ]
 
