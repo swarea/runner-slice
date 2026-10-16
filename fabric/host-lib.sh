@@ -287,7 +287,8 @@ host_install_file() {
     return 0
 }
 
-# host_remove_file PATH REASON   returns 0 when it removed (or would remove)
+# host_remove_file PATH REASON   returns 0 when it removed (or would remove),
+# 1 when there was nothing to remove, and 2 when the removal failed
 host_remove_file() {
     local path=$1 reason=$2
     [ -e "$path" ] || { ok "no $path"; return 1; }
@@ -452,16 +453,26 @@ host_remove_user() {
 # No nsswitch.conf means glibc's default, files. An unreadable one is not
 # local.
 host_accounts_are_local() {
-    local conf="$HOST_ROOT/etc/nsswitch.conf" sources src
-    [ -e "$conf" ] || return 0
-    [ -r "$conf" ] || return 1
-    sources=$(awk '$1 == "passwd:" { $1 = ""; print }' "$conf")
-    for src in $sources; do
+    local conf="$HOST_ROOT/etc/nsswitch.conf" src compat=0
+    local -a sources=()
+    if [ -e "$conf" ]; then
+        [ -r "$conf" ] || return 1
+        # glibc accepts "passwd:files" as well as "passwd: files", and a
+        # comment may follow the sources.
+        read -ra sources < <(sed 's/#.*//' "$conf" |
+            awk -F: '$1 ~ /^[ \t]*passwd[ \t]*$/ { sub(/^[^:]*:/, ""); print; exit }')
+    fi
+    for src in "${sources[@]}"; do
         case "$src" in
-            files|systemd|compat|\[*) ;;
+            files|systemd|\[*) ;;
+            compat) compat=1 ;;
             *) return 1 ;;
         esac
     done
+    # compat reads NIS accounts through "+" and "-" lines in /etc/passwd.
+    if [ "$compat" -eq 1 ] && grep -q '^[+-]' "$HOST_ROOT/etc/passwd" 2>/dev/null; then
+        return 1
+    fi
     return 0
 }
 
@@ -472,7 +483,10 @@ host_accounts_are_local() {
 # when the table cannot be read. A runtime root with anything mounted in it
 # is never removed: the data on that filesystem is not RunnerSlice's.
 host_mounts_under() {
-    local root=$1 table="$PROC_ROOT/self/mountinfo" mp found="" lines=0
+    local root table="$PROC_ROOT/self/mountinfo" mp found="" lines=0
+    # The table lists canonical paths; a root reached through a symlink
+    # (/var -> /data/var) would otherwise match nothing.
+    root=$(realpath -m -- "$1") || return 2
     [ -r "$table" ] || return 2
     while read -r _ _ _ _ mp _; do
         lines=$((lines + 1))
