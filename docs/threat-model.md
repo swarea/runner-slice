@@ -116,6 +116,9 @@ observed on a real host before it counts.
   it, stores it or prints it. It prints the command for a person to run.
   That command passes the token through the environment, never as an
   argument: sudo logs command lines, and `ps` shows them to every account.
+  It is printed inside `( ... )`, so the token lives in a subshell and is gone
+  when the subshell ends, even if `config.sh` fails or is interrupted. A `gh`
+  that fails ends the subshell before `config.sh` runs.
 - RunnerSlice never runs what the runner account can write. The installed
   version is read from the runner's dependency manifest as data. Files the
   runner writes (`.runner`, `bin/Runner.Listener.deps.json`) are reached by
