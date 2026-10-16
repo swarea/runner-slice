@@ -409,10 +409,13 @@ echo '== accounts RunnerSlice did not create =='
 ACC="$T/acct"
 mkdir -p "$ACC/root/etc"
 echo 'UID_MIN                  1000' > "$ACC/root/etc/login.defs"
+# Exit 2 is "not found", as the real getent; $FAKE_ACCOUNTS.getent-error
+# makes every lookup fail the way an unreachable directory service does.
 cat > "$T/bin/getent" <<'EOF'
 #!/usr/bin/env bash
+[ -e "$FAKE_ACCOUNTS.getent-error" ] && exit 3
 if [ "$#" -eq 1 ]; then cat "$FAKE_ACCOUNTS.$1"; exit; fi
-grep "^$2:" "$FAKE_ACCOUNTS.$1" 2>/dev/null
+grep "^$2:" "$FAKE_ACCOUNTS.$1" 2>/dev/null || exit 2
 EOF
 for c in groupadd useradd groupdel; do
     # shellcheck disable=SC2016 # the fake expands these when it runs
@@ -528,6 +531,30 @@ echo keep > "$FAKE_ACCOUNTS.userdel"; echo "runner-app:x:1234:" > "$FAKE_ACCOUNT
 acct host_remove_user runner-app >/dev/null
 result "a group of that name with another gid is left" "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
 
+# Accounts that also come from a directory service cannot all be listed, so
+# "no other account uses this gid" cannot be proved, and the group is kept.
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"
+printf 'passwd:         files sss\ngroup:          files sss\n' > "$ACC/root/etc/nsswitch.conf"
+result "with accounts from a directory service, the group is kept and reported" \
+    "0:group runner-app is left: this host also resolves accounts outside local files (nsswitch), so RunnerSlice cannot prove nothing else uses gid 998" \
+    "$(acct host_remove_user runner-app)"
+result "and groupdel was not run" "userdel --remove runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+printf 'passwd:         files systemd\ngroup:          files systemd\n' > "$ACC/root/etc/nsswitch.conf"
+account runner-app 998 /home/runner-app
+echo keep > "$FAKE_ACCOUNTS.userdel"
+acct host_remove_user runner-app >/dev/null
+result "with local accounts only, the account's own group is removed" "userdel --remove runner-app|groupdel runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
+rm -f "$ACC/root/etc/nsswitch.conf"
+
+# A lookup that fails is not "no such account".
+account runner-app 998 /home/runner-app; : > "$FAKE_ACCOUNTS.getent-error"
+result "a failing account lookup stops removal" \
+    "1:cannot look up account runner-app (getent exit 3); nothing was removed for it" \
+    "$(acct host_remove_user runner-app)"
+result "and nothing was deleted" 0 "$(grep -c . "$FAKE_ACCOUNTS.log")"
+rm -f "$FAKE_ACCOUNTS.getent-error"
+
 account runner-app 998 /home/runner-app; : > "$FAKE_ACCOUNTS.passwd"
 result "a group found without its account is reported, never removed" \
     "0:group runner-app exists without its account; RunnerSlice can no longer tell whether it was this runner's" \
@@ -586,6 +613,11 @@ reset_procs; mkdir -p "$PR/204"; printf 'Name:\tbroken\n' > "$PR/204/status"
 result "a status without a Uid line cannot be judged" "2:" "$(procs rs-probe)"
 reset_procs
 result "an account that does not exist has no processes to find" "1:" "$(procs rs-nobody)"
+proc_status 205 locked '990	990	990	990'; chmod 0000 "$PR/205/status"
+result "a status that exists but cannot be read cannot be judged" "2:" "$(procs rs-probe)"
+chmod 0644 "$PR/205/status"; reset_procs
+printf '#!/usr/bin/env bash\nexit 3\n' > "$T/bin/getent"
+result "a failing account lookup cannot be judged" "2:" "$(procs rs-probe)"
 rm -f "$T/bin/getent"
 
 echo
