@@ -186,6 +186,11 @@ run against one recorded commit.
 
 The version follows the evidence. No stage is skipped to reach a number.
 
+**Development ended at Alpha on 2026-10-17.** The Beta and 1.0 rows define
+what those stages would have required. They are kept as definitions, and no
+work towards them is planned. The project is a public alpha, at
+`0.1.0-dev`, with no release or tag.
+
 ## Open decisions (owner)
 
 Decided:
@@ -197,7 +202,4 @@ Decided:
 - on 2026-10-16: public visibility. Hosted CI for a public repository needs
   no paid minutes.
 
-Still open, each a separate approval:
-
-- **the first release and tag**;
-- **an x86_64 verification host**, and its cost.
+Not pursued: a release or tag, and an x86_64 verification host.

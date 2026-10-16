@@ -54,8 +54,8 @@ repository names, network details and account identifiers are left out.
   finished along a critical path of 14.8 minutes, against 17.9 minutes run one
   after another. Jobs running at the same time each took 1.4 to 1.8 times as
   long as alone.
-  - One sample is not a performance result. A 7-day before-and-after
-    comparison is planned, and nothing more is claimed until it exists.
+  - One sample is not a performance result, and no longer comparison is
+    recorded here. Nothing more is claimed.
   - This experience is why pools exist in RunnerSlice.
 - **What did not fit.** The mobile-app repository's Android build needed
   x86_64-only tools under emulation: 18 to 26 times slower per core on

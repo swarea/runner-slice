@@ -107,8 +107,10 @@ inventory and the library, then reads the host:
   unknown CPU quota format.
 
 The fixtures in the drills encode what systemd is expected to print. Each of
-those assumptions is listed in [verification.md](verification.md) and has to be
-observed on a real host before it counts.
+those assumptions is listed in [verification.md](verification.md) with what a
+real Ubuntu 24.04 aarch64 host with systemd 255 showed. Two of them were wrong
+until that host corrected them: the archive's modes and how `RestrictNamespaces`
+is printed. On any other host they are still assumptions.
 
 ## Handling of registration
 
