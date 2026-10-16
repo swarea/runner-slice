@@ -1,6 +1,21 @@
+<div align="center">
+
+<img src="docs/assets/mark.png" alt="" width="96" height="96">
+
 # RunnerSlice
 
-A systemd-native manager for self-hosted GitHub Actions runners.
+**A systemd-native manager for self-hosted GitHub Actions runners.**
+
+[Installation](docs/installation.md) ·
+[Operations](docs/operations.md) ·
+[Threat model](docs/threat-model.md) ·
+[Verification](docs/verification.md)
+
+[![check](https://github.com/swarea/runner-slice/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/swarea/runner-slice/actions/workflows/check.yml?query=branch%3Amain)
+![status: public alpha](https://img.shields.io/badge/status-public%20alpha-0f6b7d)
+[![MIT](https://img.shields.io/badge/licence-MIT-1c1e22)](LICENSE)
+
+</div>
 
 RunnerSlice runs persistent, repository-scoped GitHub Actions runners on a
 Linux host you already operate. Each runner has its own Unix account and
@@ -11,7 +26,8 @@ the running host, that the boundary and limits are what you declared.
 It is Bash and systemd. It has no daemon, no database, no Kubernetes and no
 web server.
 
-> **Status: public alpha (0.1.0-dev). There is no release or tag yet.**
+> **Status: public alpha (0.1.0-dev). Development has ended at this stage.
+> There is no release or tag.**
 >
 > - **Every push and pull request** runs shellcheck and every drill on
 >   GitHub-hosted runners (the `check` workflow). The drills exercise each
@@ -95,6 +111,22 @@ need to bound and verify what CI can take from it.
 ## How it works
 
 ```text
+              one host
+ ┌─────────────────────────────────────────────────┐
+ │ ci.slice   CPUQuota, MemoryMax, TasksMax        │
+ │            IPAddressDeny (optional)             │
+ │ ┌───────────────────┐  ┌───────────────────┐    │
+ │ │ runner-app        │  │ runner-web        │    │
+ │ │ own account, root │  │ own account, root │    │
+ │ │ peers' roots, all │  │ peers' roots, all │    │
+ │ │ homes, Docker     │  │ homes, Docker     │    │
+ │ │ socket: masked    │  │ socket: masked    │    │
+ │ └───────────────────┘  └───────────────────┘    │
+ └─────────────────────────────────────────────────┘
+   plan / apply / retire change it;  check reads it back
+```
+
+```text
 /etc/runner-slice/fabric.conf           slice limits, prefixes, masks for the whole host
 /etc/runner-slice/runner-release.conf   the actions/runner release to install, by SHA-256
 /etc/runner-slice/profiles/app.conf     one runner: repository, name, account, labels
@@ -124,8 +156,8 @@ what has been verified.
 
 ## Getting started
 
-1. Read [Installation](docs/installation.md): requirements, and how to
-   install from a checkout until the first release exists.
+1. Read [Installation](docs/installation.md): requirements, and how to build
+   the archive from a commit and install it. No release is published.
 2. Write the inventory ([Configuration](docs/configuration.md)), then follow
    [Operations](docs/operations.md) from `plan` to the first registered runner.
 3. Run `sudo runner-slice check` after every change and every reboot.
