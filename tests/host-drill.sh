@@ -545,7 +545,24 @@ account runner-app 998 /home/runner-app
 echo keep > "$FAKE_ACCOUNTS.userdel"
 acct host_remove_user runner-app >/dev/null
 result "with local accounts only, the account's own group is removed" "userdel --remove runner-app|groupdel runner-app" "$(paste -sd'|' "$FAKE_ACCOUNTS.log")"
-rm -f "$ACC/root/etc/nsswitch.conf"
+local_accts() { HOST_ROOT="$ACC/root"; host_accounts_are_local && echo local || echo not-local; }
+printf 'passwd:files sss\n' > "$ACC/root/etc/nsswitch.conf"
+result "no space after the colon still names the directory service" not-local "$(local_accts)"
+printf 'passwd: files # sss\n' > "$ACC/root/etc/nsswitch.conf"
+result "a comment after the sources is not a source" local "$(local_accts)"
+printf 'passwd: files [NOTFOUND=return] ldap\n' > "$ACC/root/etc/nsswitch.conf"
+result "an action does not hide the source after it" not-local "$(local_accts)"
+printf 'passwd: files [NOTFOUND=return]\n' > "$ACC/root/etc/nsswitch.conf"
+: > "$ACC/e"; : > "$ACC/N"
+result "a file in the working directory does not change the sources" local "$(cd "$ACC" && local_accts)"
+rm -f "$ACC/e" "$ACC/N"
+printf 'passwd: compat\n' > "$ACC/root/etc/nsswitch.conf"
+printf 'root:x:0:0::/root:/bin/bash\n' > "$ACC/root/etc/passwd"
+result "compat with only local lines is local" local "$(local_accts)"
+printf '+@staff::::::\n' >> "$ACC/root/etc/passwd"
+result "compat pulling in NIS accounts is not" not-local "$(local_accts)"
+rm -f "$ACC/root/etc/nsswitch.conf" "$ACC/root/etc/passwd"
+result "no nsswitch.conf is glibc's default, files" local "$(local_accts)"
 
 # A lookup that fails is not "no such account".
 account runner-app 998 /home/runner-app; : > "$FAKE_ACCOUNTS.getent-error"
@@ -580,6 +597,25 @@ out=$(PATH="$T/acc-bin:$PATH" host_expect_no_access nobody "$T/acc-file")
 result "and the boundary check fails rather than passes" yes \
     "$(grep -q 'FAIL    cannot test whether nobody can read' <<<"$out" && echo yes || echo no)"
 check_failed=0
+
+echo
+echo '== mounts under a runtime root, as the kernel lists them =='
+
+MT="$T/mnt"; mkdir -p "$MT/proc/self" "$MT/real/lib/ci-app" "$MT/real/lib/ci-app2"
+ln -s "$MT/real" "$MT/linked"
+mounts() { local out rc=0; out=$(PROC_ROOT="$MT/proc"; host_mounts_under "$1") || rc=$?; printf '%s:%s' "$rc" "$out"; }
+table() { : > "$MT/proc/self/mountinfo"; printf '22 1 8:1 / / rw - ext4 /dev/sda1 rw\n' >> "$MT/proc/self/mountinfo"
+          local m; for m in "$@"; do printf '97 22 0:55 / %s rw - tmpfs t rw\n' "$m" >> "$MT/proc/self/mountinfo"; done; }
+table
+result "nothing mounted under the root" "0:" "$(mounts "$MT/real/lib/ci-app")"
+table "$MT/real/lib/ci-app2/work"
+result "a sibling sharing the prefix is not under it" "0:" "$(mounts "$MT/real/lib/ci-app")"
+table "$MT/real/lib/ci-app/my\\040work"
+result "an escaped space in the table is decoded" "1:$MT/real/lib/ci-app/my work" "$(mounts "$MT/real/lib/ci-app")"
+table "$MT/real/lib/ci-app/work"
+result "a root reached through a symlink is compared as the kernel lists it" "1:$MT/real/lib/ci-app/work" "$(mounts "$MT/linked/lib/ci-app")"
+: > "$MT/proc/self/mountinfo"
+result "an empty table cannot be judged" "2:" "$(mounts "$MT/real/lib/ci-app")"
 
 echo
 echo '== processes of an account, by every uid the kernel keeps =='
