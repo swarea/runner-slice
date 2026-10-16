@@ -109,6 +109,16 @@ while [ "$#" -gt 0 ] && [ "$1" != -- ]; do shift; done
 shift
 exec "$@"
 EOF
+# tar is the real one. Right after it extracts, the mode of the directory it
+# extracted into is recorded: the window before RunnerSlice's own chmod.
+cat > "$BIN/tar" <<'EOF'
+#!/usr/bin/env bash
+/usr/bin/tar "$@" || exit
+dir=
+while [ "$#" -gt 0 ]; do [ "$1" = -C ] && dir=$2; shift; done
+[ -n "$dir" ] && [ -n "${FAKE-}" ] && stat -c %a "$dir" >> "$FAKE/tar-dir-mode"
+exit 0
+EOF
 chmod +x "$BIN"/*
 
 # A release archive with the runner's shape and none of its content.
@@ -123,6 +133,8 @@ printf '{"runtimeTarget": {"name": ".NETCoreApp,Version=v8.0/linux-x64"}, "libra
     > "$PAYLOAD/bin/Runner.Listener.deps.json"
 printf '#!/bin/sh\nexit 0\n' > "$PAYLOAD/bin/runsvc.sh"
 chmod +x "$PAYLOAD/config.sh" "$PAYLOAD/bin/"*
+# The official archive's "." entry is 0775; so is this one's.
+chmod 0775 "$PAYLOAD"
 ARCHIVE="$T/actions-runner-linux-x64-2.338.0.tar.gz"
 tar -czf "$ARCHIVE" -C "$PAYLOAD" .
 
